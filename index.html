@@ -1,0 +1,1189 @@
+<!-- Deklarace typu dokumentu jako HTML5 -->
+<!DOCTYPE html>
+<!-- Kořenový element stránky, jazyk nastaven na češtinu -->
+<html lang="cs">
+<head>
+  <!-- Kódování znaků UTF-8, aby fungovala česká diakritika -->
+  <meta charset="UTF-8">
+  <!-- Responzivní chování na mobilech: šířka = šířka zařízení, výchozí zoom 1 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Titulek v záložce prohlížeče -->
+  <title>Kempy Chorvatsko — interaktivní mapa</title>
+
+  <!-- Styl mapové knihovny Leaflet (načítá se z CDN cdnjs) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <!-- Základní styl shlukování značek (marker clustering) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css">
+  <!-- Výchozí vzhled shluků značek -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css">
+
+  <style>
+    /* ===== Barevný a typografický systém (Jadran: hlubinná teal + písek) ===== */
+    :root{
+      --bg:#0b1418;              /* nejtmavší pozadí panelů (hlubina moře) */
+      --panel:#0f1c22;           /* pozadí panelů o stupeň světlejší */
+      --panel-2:#13252c;         /* pozadí zvýrazněných bloků (karty) */
+      --line:#20363f;            /* barva jemných linek a rámečků */
+      --ink:#e9f1f2;             /* hlavní text (skoro bílá) */
+      --muted:#8aa4ab;           /* ztlumený text (popisky, metadata) */
+      --sea:#2dd4bf;             /* primární akcent = kemp (teal Jadranu) */
+      --van:#a78bfa;             /* akcent pro caravan/stellplatz (fialová) */
+      --sand:#f5b841;            /* akcent pro „spaní v autě" (písková zlatá) */
+      --danger:#f87171;          /* chybové stavy (červená) */
+      --radius:12px;             /* jednotné zaoblení rohů */
+    }
+
+    /* Reset výchozích okrajů a použití border-box modelu pro všechny prvky */
+    *{margin:0;padding:0;box-sizing:border-box}
+
+    /* Základní nastavení stránky: výška, font, barvy, zákaz přetečení */
+    html,body{height:100%;overflow:hidden}
+    body{
+      font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; /* systémové písmo = offline, bez CDN fontů */
+      background:var(--bg);      /* tmavé pozadí */
+      color:var(--ink);          /* světlý text */
+      -webkit-font-smoothing:antialiased; /* jemnější vykreslení písma na Webkitu */
+    }
+
+    /* Monospace font pro data (souřadnice, ID) — dojem přístrojového panelu */
+    .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+
+    /* ===== Rozvržení: horní lišta + tělo (sidebar + mapa) ===== */
+    #app{display:flex;flex-direction:column;height:100%} /* svislé rozvržení celé aplikace */
+
+    /* Horní lišta s názvem a stavem dat */
+    #topbar{
+      display:flex;align-items:center;gap:14px;      /* prvky vedle sebe, mezera mezi nimi */
+      padding:10px 16px;                              /* vnitřní odsazení */
+      background:var(--panel);                        /* tmavé pozadí lišty */
+      border-bottom:1px solid var(--line);            /* oddělovací linka dole */
+      flex:0 0 auto;                                  /* lišta nemění výšku */
+      z-index:1200;                                   /* nad mapou */
+    }
+    /* Blok názvu aplikace vlevo */
+    #brand{display:flex;flex-direction:column;line-height:1.1}
+    #brand b{font-size:15px;letter-spacing:.3px}       /* hlavní název */
+    #brand span{font-size:11px;color:var(--muted)}     /* podtitulek */
+
+    /* Stavový text o datech (počet kempů, čas aktualizace) */
+    #status{font-size:12px;color:var(--muted);margin-left:auto} /* margin-left:auto = zarovnání doprava */
+
+    /* Obecný vzhled tlačítka */
+    .btn{
+      background:var(--panel-2);border:1px solid var(--line);color:var(--ink); /* barvy tlačítka */
+      padding:7px 12px;border-radius:9px;font-size:12.5px;cursor:pointer; /* velikost a kurzor */
+      display:inline-flex;align-items:center;gap:6px;transition:.15s;      /* ikona+text, plynulý přechod */
+    }
+    .btn:hover{border-color:var(--sea);color:#fff}     /* zvýraznění při najetí myší */
+    .btn:disabled{opacity:.5;cursor:not-allowed}       /* zakázané tlačítko */
+
+    /* Tělo pod horní lištou: sidebar vlevo, mapa vpravo */
+    #body{display:flex;flex:1 1 auto;min-height:0}      /* min-height:0 kvůli správnému scrollování dětí */
+
+    /* Levý panel s filtry a seznamem */
+    #sidebar{
+      width:360px;flex:0 0 360px;                       /* pevná šířka panelu */
+      background:var(--panel);border-right:1px solid var(--line); /* pozadí a pravá linka */
+      display:flex;flex-direction:column;min-height:0;  /* svislé rozvržení */
+    }
+
+    /* Sekce filtrů (nescrolluje, je nahoře v sidebaru) */
+    #filters{padding:12px 14px;border-bottom:1px solid var(--line);flex:0 0 auto}
+
+    /* Vyhledávací pole */
+    #search{
+      width:100%;padding:9px 11px;border-radius:9px;    /* velikost a zaoblení */
+      background:var(--bg);border:1px solid var(--line);color:var(--ink);font-size:13px; /* vzhled */
+    }
+    #search::placeholder{color:var(--muted)}             /* barva nápovědného textu */
+    #search:focus{outline:none;border-color:var(--sea)}  /* zvýraznění při psaní */
+
+    /* Řádek s ovládacími prvky filtrů */
+    .frow{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px} /* zalamování do více řádků */
+
+    /* „Pilulka" = přepínatelný filtr (chip) */
+    .pill{
+      font-size:11.5px;padding:5px 10px;border-radius:999px;   /* oválný tvar */
+      background:var(--bg);border:1px solid var(--line);color:var(--muted); /* výchozí vzhled */
+      cursor:pointer;user-select:none;transition:.12s;white-space:nowrap;   /* nezalamovat text */
+    }
+    .pill:hover{color:var(--ink)}                          /* text zesvětlá při najetí */
+    .pill.on{background:var(--sea);border-color:var(--sea);color:#04231f;font-weight:600} /* aktivní stav */
+    .pill.on.sand{background:var(--sand);border-color:var(--sand);color:#2a1e02} /* aktivní „auto" filtr = zlatá */
+    .pill.on.van{background:var(--van);border-color:var(--van);color:#1c1233}    /* aktivní caravan = fialová */
+
+    /* Malý výběrový box (hvězdičky, oblast) */
+    select.mini{
+      font-size:11.5px;padding:5px 8px;border-radius:8px;   /* velikost */
+      background:var(--bg);border:1px solid var(--line);color:var(--ink); /* barvy */
+    }
+
+    /* Hlavička seznamu s počtem výsledků */
+    #listhead{
+      display:flex;align-items:center;justify-content:space-between; /* text vlevo, řazení vpravo */
+      padding:9px 14px;font-size:11.5px;color:var(--muted);          /* drobný ztlumený text */
+      border-bottom:1px solid var(--line);flex:0 0 auto;
+    }
+    #listhead b{color:var(--sea)}                          /* číslo počtu zvýrazněné */
+
+    /* Scrollovatelný seznam kempů */
+    #list{flex:1 1 auto;overflow-y:auto;min-height:0}       /* zabírá zbytek výšky a scrolluje */
+
+    /* Jedna položka seznamu */
+    .item{
+      padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;transition:.1s; /* klikatelná karta */
+    }
+    .item:hover{background:var(--panel-2)}                  /* zvýraznění při najetí */
+    .item .nm{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:7px} /* název kempu */
+    .item .meta{font-size:11px;color:var(--muted);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap} /* metadata */
+
+    /* Barevná tečka podle typu kempu (před názvem) */
+    .dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto} /* malý kruh */
+    .dot.camp{background:var(--sea)}                        /* kemp = teal */
+    .dot.van{background:var(--van)}                         /* caravan/stellplatz = fialová */
+
+    /* Malý štítek (badge) uvnitř metadat */
+    .tag{
+      font-size:10px;padding:2px 6px;border-radius:6px;      /* drobný štítek */
+      background:var(--bg);border:1px solid var(--line);color:var(--muted); /* výchozí barvy */
+    }
+    .tag.auto{background:rgba(245,184,65,.14);border-color:var(--sand);color:var(--sand)} /* štítek „auto" = zlatá */
+
+    /* ===== Mapa ===== */
+    #map{flex:1 1 auto;min-width:0;background:#08131a}       /* mapa zabírá zbytek šířky */
+
+    /* Legenda v rohu mapy */
+    #legend{
+      position:absolute;left:12px;bottom:12px;z-index:1000;  /* ukotvení v levém dolním rohu */
+      background:rgba(11,20,24,.9);border:1px solid var(--line);border-radius:10px; /* poloprůhledné pozadí */
+      padding:9px 11px;font-size:11px;color:var(--muted);backdrop-filter:blur(4px); /* rozostření pozadí */
+    }
+    #legend .lg{display:flex;align-items:center;gap:7px;margin:3px 0} /* řádek legendy */
+
+    /* Vlastní vzhled bodové značky (barevný puntík) */
+    .mk{display:block;width:14px;height:14px;border-radius:50%;border:2px solid var(--bg)} /* kroužek s tmavým rámem */
+
+    /* Přebarvení shluků značek do tématu aplikace */
+    .marker-cluster{background:rgba(45,212,191,.25)}         /* vnější kruh shluku */
+    .marker-cluster div{background:rgba(45,212,191,.85);color:#04231f;font-weight:700} /* vnitřní kruh s číslem */
+
+    /* ===== Detailní panel (překryv nad sidebarem / obrazovkou) ===== */
+    #detail{
+      position:absolute;top:0;right:0;height:100%;width:380px;  /* panel vpravo přes celou výšku */
+      background:var(--panel);border-left:1px solid var(--line); /* levá linka odděluje od mapy */
+      transform:translateX(100%);transition:transform .22s ease; /* schovaný napravo mimo obrazovku */
+      z-index:1500;display:flex;flex-direction:column;overflow:hidden; /* nad vším ostatním */
+    }
+    #detail.open{transform:translateX(0)}                     /* otevřený = zasune se do obrazovky */
+
+    /* Hlavička detailu s názvem a křížkem */
+    #dhead{
+      padding:14px 16px;border-bottom:1px solid var(--line);   /* oddělení od těla */
+      display:flex;align-items:flex-start;gap:10px;flex:0 0 auto;
+    }
+    #dhead h2{font-size:16px;line-height:1.2;flex:1 1 auto}    /* název zabírá volné místo */
+    #dclose{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1} /* zavírací křížek */
+    #dclose:hover{color:var(--ink)}
+
+    /* Scrollovatelné tělo detailu */
+    #dbody{flex:1 1 auto;overflow-y:auto;padding:14px 16px;min-height:0}
+
+    /* Řádek informace: popisek + hodnota */
+    .drow{margin-bottom:12px}
+    .drow .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:3px} /* popisek */
+    .drow .v{font-size:13.5px;line-height:1.4}                 /* hodnota */
+
+    /* Blok odkazových tlačítek */
+    .links{display:flex;flex-direction:column;gap:7px}
+    .lnk{
+      display:flex;align-items:center;gap:8px;text-decoration:none;  /* tlačítko-odkaz */
+      background:var(--panel-2);border:1px solid var(--line);color:var(--ink); /* barvy */
+      padding:9px 11px;border-radius:9px;font-size:12.5px;transition:.15s; /* velikost */
+    }
+    .lnk:hover{border-color:var(--sea)}                        /* zvýraznění */
+    .lnk .ic{width:16px;text-align:center}                    /* místo pro ikonu */
+
+    /* Editovatelná pole (moje doplnění) */
+    .edit label{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);display:block;margin:10px 0 4px} /* popisek pole */
+    .edit input,.edit textarea,.edit select{
+      width:100%;background:var(--bg);border:1px solid var(--line);color:var(--ink); /* vzhled polí */
+      border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit; /* velikost a font */
+    }
+    .edit input:focus,.edit textarea:focus,.edit select:focus{outline:none;border-color:var(--sea)} /* aktivní pole */
+    .edit textarea{resize:vertical;min-height:60px}           /* poznámka jde svisle zvětšit */
+
+    /* Blok se souřadnicemi v monospace */
+    .coords{font-size:12px;color:var(--sea)}
+
+    /* ===== Stavová hlášení (načítání / chyba) ===== */
+    #overlay{
+      position:absolute;inset:0;z-index:1600;display:none;      /* překryv přes celou aplikaci, skrytý */
+      background:rgba(8,15,20,.82);backdrop-filter:blur(3px);   /* ztmavení pozadí */
+      align-items:center;justify-content:center;flex-direction:column;gap:14px;text-align:center;padding:24px;
+    }
+    #overlay.show{display:flex}                                 /* zobrazení překryvu */
+    .spinner{
+      width:34px;height:34px;border-radius:50%;                 /* kruhový spinner */
+      border:3px solid var(--line);border-top-color:var(--sea); /* jen horní okraj barevný */
+      animation:spin 1s linear infinite;                        /* nekonečná rotace */
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}               /* definice rotace */
+    #overlay .msg{font-size:13.5px;color:var(--ink);max-width:420px;line-height:1.5} /* text hlášení */
+    #overlay .sub{font-size:11.5px;color:var(--muted)}          /* podřádek */
+
+    /* Obal progres baru (šířka omezená, na mobilu 80 %) */
+    #progWrap{width:min(440px,80vw);display:none;flex-direction:column;gap:7px} /* skrytý, dokud nestahujeme */
+    #progWrap.show{display:flex}                                 /* zobrazení při stahování */
+    /* Kolej progres baru (pozadí) */
+    #progTrack{height:9px;background:var(--line);border-radius:99px;overflow:hidden;position:relative} /* šedá dráha */
+    /* Výplň progres baru (roste podle procent) */
+    #progFill{
+      height:100%;width:0%;border-radius:99px;                  /* výchozí prázdná */
+      background:linear-gradient(90deg,var(--sea),var(--sand)); /* přechod teal → zlatá */
+      transition:width .18s ease;                               /* plynulé narůstání */
+    }
+    /* Neurčitý režim (neznáme celkovou velikost): pruh jezdí sem a tam */
+    #progTrack.indet #progFill{width:38% !important;animation:indet 1.1s infinite ease-in-out} /* jezdící pruh */
+    @keyframes indet{0%{margin-left:-40%}100%{margin-left:102%}} /* pohyb zleva doprava */
+    /* Velké procento nad barem */
+    #progPct{font-size:20px;font-weight:700;color:var(--ink);font-family:ui-monospace,Menlo,monospace} /* číslo % */
+    /* Řádek s odhadem počtu kempů a velikostí */
+    #progText{font-size:11.5px;color:var(--muted)}              /* detailní text */
+
+    /* Tlačítko pro otevření sidebaru na mobilu (skryté na desktopu) */
+    #sbtoggle{display:none}
+
+    /* ===== Responzivita: úzké obrazovky (mobil) ===== */
+    @media (max-width:760px){
+      #sidebar{
+        position:absolute;left:0;top:0;height:100%;width:88%;max-width:360px; /* sidebar jako překryv */
+        z-index:1400;transform:translateX(-100%);transition:transform .22s; /* schovaný vlevo */
+        box-shadow:2px 0 20px rgba(0,0,0,.5);
+      }
+      #sidebar.open{transform:translateX(0)}                    /* otevřený sidebar */
+      #sbtoggle{display:inline-flex}                            /* tlačítko menu se zobrazí */
+      #detail{width:100%}                                       /* detail přes celou šířku */
+      #status{display:none}                                     /* stav skryjeme kvůli místu */
+    }
+  </style>
+</head>
+<body>
+  <!-- Hlavní kontejner aplikace -->
+  <div id="app">
+
+    <!-- Horní lišta -->
+    <div id="topbar">
+      <!-- Tlačítko menu (jen mobil): otevře/zavře sidebar -->
+      <button id="sbtoggle" class="btn" title="Filtry a seznam">☰</button>
+      <!-- Název a podtitulek aplikace -->
+      <div id="brand">
+        <b>Kempy Chorvatsko</b>
+        <span>živá data z OpenStreetMap • satelitní mapa</span>
+      </div>
+      <!-- Stavový text o datech (naplní JS) -->
+      <div id="status">Načítám…</div>
+      <!-- Tlačítko pro znovunačtení dat z internetu -->
+      <button id="refresh" class="btn" title="Aktualizovat data z OpenStreetMap">↻ Aktualizovat</button>
+    </div>
+
+    <!-- Tělo: sidebar + mapa -->
+    <div id="body">
+
+      <!-- Levý panel -->
+      <aside id="sidebar">
+        <!-- Sekce filtrů -->
+        <div id="filters">
+          <!-- Vyhledávací pole podle názvu / města -->
+          <input id="search" type="text" placeholder="Hledat kemp nebo město…">
+
+          <!-- Řádek přepínačů typu a klíčových filtrů -->
+          <div class="frow">
+            <!-- Filtr: pouze kde lze přespat v autě (klíčová funkce) -->
+            <span class="pill sand" data-filter="car">🚗 Spaní v autě</span>
+            <!-- Filtr: klasické kempy -->
+            <span class="pill" data-filter="camp">Kempy</span>
+            <!-- Filtr: caravan/stellplatz -->
+            <span class="pill van" data-filter="van">Stellplatz / caravan</span>
+            <!-- Filtr: pouze kempy s webem -->
+            <span class="pill" data-filter="web">Má web</span>
+          </div>
+
+          <!-- Řádek s výběrem oblasti a minimem hvězdiček -->
+          <div class="frow">
+            <!-- Výběr oblasti (naplní JS možnostmi) -->
+            <select id="region" class="mini" title="Oblast (odhad podle polohy)">
+              <option value="">Celé Chorvatsko</option>
+            </select>
+            <!-- Minimální počet hvězdiček -->
+            <select id="stars" class="mini" title="Minimální hodnocení">
+              <option value="0">Hvězdičky: vše</option>
+              <option value="2">min. 2★</option>
+              <option value="3">min. 3★</option>
+              <option value="4">min. 4★</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Hlavička seznamu: počet + řazení -->
+        <div id="listhead">
+          <span>Zobrazeno <b id="count">0</b> kempů</span>
+          <!-- Výběr řazení seznamu -->
+          <select id="sort" class="mini">
+            <option value="name">A–Z</option>
+            <option value="stars">Hvězdičky</option>
+            <option value="region">Oblast</option>
+          </select>
+        </div>
+
+        <!-- Vlastní seznam kempů (naplní JS) -->
+        <div id="list"></div>
+      </aside>
+
+      <!-- Mapa a její překryvy -->
+      <div id="map">
+        <!-- Legenda -->
+        <div id="legend">
+          <div class="lg"><span class="dot camp"></span> Kemp</div>
+          <div class="lg"><span class="dot van"></span> Stellplatz / caravan</div>
+          <div class="lg"><span class="mk" style="width:12px;height:12px;background:var(--sea);box-shadow:0 0 0 2px var(--sand)"></span> zlatý prstenec = lze spát v autě</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detailní panel jednoho kempu (naplní JS) -->
+  <div id="detail">
+    <div id="dhead">
+      <h2 id="dname">—</h2>
+      <button id="dclose" title="Zavřít">×</button>
+    </div>
+    <div id="dbody"></div>
+  </div>
+
+  <!-- Překryv pro načítání / chyby -->
+  <div id="overlay">
+    <div class="spinner" id="ovspin"></div>
+    <div class="msg" id="ovmsg">Stahuji seznam kempů z OpenStreetMap…</div>
+    <!-- Progres bar (zobrazí se během stahování) -->
+    <div id="progWrap">
+      <div id="progPct">0 %</div>                              <!-- velké procento -->
+      <div id="progTrack"><div id="progFill"></div></div>      <!-- dráha + výplň -->
+      <div id="progText">připravuji stahování…</div>           <!-- odhad počtu / velikost -->
+    </div>
+    <div class="sub" id="ovsub">Stáhne se jen při prvním spuštění. Příště se data načtou hned z prohlížeče a aktualizaci spustíš tlačítkem ↻.</div>
+  </div>
+
+  <!-- Knihovna Leaflet (mapa) z CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <!-- Plugin pro shlukování značek z CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+
+  <script>
+  /* =========================================================================
+     KONFIGURACE
+     ========================================================================= */
+
+  // Klíče pro ukládání do localStorage (verzované, aby šlo v budoucnu měnit strukturu)
+  const CACHE_KEY = 'hr_camps_cache_v1';   // uložený stažený dataset kempů
+  const USER_KEY  = 'hr_camps_user_v1';    // moje editace (cena, poznámky, adresa, spaní v autě)
+
+  // Seznam Overpass endpointů (zrcadel) — zkouší se postupně, kdyby jeden nefungoval
+  const OVERPASS = [
+    'https://overpass-api.de/api/interpreter',        // hlavní veřejný server
+    'https://overpass.kumi.systems/api/interpreter',  // záložní zrcadlo 1
+    'https://overpass.private.coffee/api/interpreter' // záložní zrcadlo 2
+  ];
+
+  // Dotaz do Overpass API: všechny kempy a caravan/stellplatz sites v Chorvatsku (kód země HR)
+  const QUERY = `
+    [out:json][timeout:90];
+    area["ISO3166-1"="HR"]->.hr;
+    (
+      nwr["tourism"="camp_site"](area.hr);
+      nwr["tourism"="caravan_site"](area.hr);
+    );
+    out center tags;`;
+  // nwr = node/way/relation; out center = u ploch vrátí středový bod; tags = i s popisky
+
+  // Rychlý dotaz jen na POČET kempů (out count) — použije se pro cíl progres baru
+  const COUNT_QUERY = `
+    [out:json][timeout:60];
+    area["ISO3166-1"="HR"]->.hr;
+    (
+      nwr["tourism"="camp_site"](area.hr);
+      nwr["tourism"="caravan_site"](area.hr);
+    );
+    out count;`;
+  // out count = server nevrátí data, jen kolik prvků by dotaz našel
+
+  // Ověřené oficiální weby velkých resortů (klíč = normalizovaný název).
+  // Slouží jako „obohacení" tam, kde OSM web nemá. Klidně si sem doplň další.
+  const CURATED_SITES = {
+    'zaton holiday resort':'https://www.zaton.hr' // ověřeno na webu (zaton.hr)
+  };
+
+  /* =========================================================================
+     STAV APLIKACE
+     ========================================================================= */
+
+  let ALL = [];                 // všechny načtené kempy (pole objektů)
+  let FILTERED = [];            // aktuálně vyfiltrované kempy
+  let USER = loadUser();        // moje uložené editace podle ID kempu
+  let map, cluster, layers;     // reference na mapu, vrstvu shluků a podkladové vrstvy
+  const markerById = {};        // rychlý přístup ke značce podle ID kempu
+  let activeId = null;          // ID právě otevřeného kempu v detailu
+
+  // Aktivní přepínatelné filtry (pilulky). Výchozí: nic zapnuté.
+  const flags = { car:false, camp:false, van:false, web:false };
+
+  /* =========================================================================
+     POMOCNÉ FUNKCE PRO ÚLOŽIŠTĚ (bezpečné vůči zákazu localStorage)
+     ========================================================================= */
+
+  // Bezpečné čtení JSON z localStorage; při chybě vrátí fallback
+  function safeGet(key, fallback){
+    try{ const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } // zkus přečíst a rozparsovat
+    catch(e){ return fallback; }                                                            // při chybě vrať výchozí
+  }
+  // Bezpečný zápis JSON do localStorage; chybu tiše ignoruje (např. v náhledu)
+  function safeSet(key, val){
+    try{ localStorage.setItem(key, JSON.stringify(val)); }  // zkus uložit
+    catch(e){ /* úložiště nedostupné — pokračuj bez ukládání */ }
+  }
+  // Načtení mých editací
+  function loadUser(){ return safeGet(USER_KEY, {}); }       // objekt {id: {...}} nebo prázdný
+  // Uložení mých editací
+  function saveUser(){ safeSet(USER_KEY, USER); }            // zapíše aktuální USER
+
+  /* =========================================================================
+     KLASIFIKACE OBLASTI PODLE SOUŘADNIC (odhad – hrubé hranice)
+     ========================================================================= */
+
+  // Vrátí přibližný název chorvatské oblasti podle zeměpisné polohy
+  function regionOf(lat, lon){
+    if(lon < 14.35 && lat > 44.7 && lat < 45.55) return 'Istrie';                         // Istrijský poloostrov
+    if(lat >= 44.15 && lat <= 45.4 && lon >= 14.2 && lon < 15.05) return 'Kvarner';       // Kvarner + ostrovy (Krk, Cres, Lošinj, Rab)
+    if(lat > 45.3 && lon >= 15.0) return 'Kontinentální Chorvatsko';                       // vnitrozemí, Záhřeb, Slavonie
+    if(lat >= 44.3 && lon >= 15.0 && lon < 16.2) return 'Lika a Karlovac';                 // vnitrozemí, Plitvice
+    if(lat >= 43.55 && lat < 44.35) return 'Severní Dalmácie (Zadar, Šibenik)';            // Zadar/Šibenik
+    if(lat >= 43.05 && lat < 43.55) return 'Střední Dalmácie (Split, Makarska)';           // Split/Makarska
+    if(lat < 43.05) return 'Jižní Dalmácie (Dubrovník)';                                   // Dubrovník a okolí
+    return 'Ostatní';                                                                       // co se nikam nevejde
+  }
+
+  /* =========================================================================
+     ODVOZENÍ „SPANÍ V AUTĚ" A DALŠÍCH VLASTNOSTÍ
+     ========================================================================= */
+
+  // Zjistí stav spaní v autě: nejdřív moje editace, jinak odhad podle typu
+  function carSleepStatus(site){
+    const u = USER[site.id];                                    // moje uložená editace
+    if(u && u.carSleep) return u.carSleep;                      // pokud jsem ho ručně nastavil, má přednost
+    if(site.kind === 'caravan_site') return 'ano';              // stellplatz/caravan = navrženo pro vozidla
+    return 'pravděpodobně';                                     // běžný kemp v Chorvatsku obvykle auto+stan dovolí
+  }
+  // Má se kemp zobrazit ve filtru „spaní v autě"? (ano nebo pravděpodobně)
+  function carSleepAllowed(site){
+    const s = carSleepStatus(site);                             // aktuální stav
+    return s === 'ano' || s === 'pravděpodobně';               // „ne" a „neznámo" se odfiltrují
+  }
+
+  /* =========================================================================
+     STAŽENÍ DAT Z OVERPASS (s cache a záložními servery)
+     ========================================================================= */
+
+  // Odhad počtu bajtů na jeden kemp (jen pro výpočet procent, když server nepošle Content-Length)
+  const BYTES_PER_CAMP = 480;                                   // empirický průměr velikosti JSON prvku
+
+  // START APLIKACE: použij uloženou cache. Stahuj JEN když žádná cache není (první spuštění na tomto počítači).
+  async function loadData(){
+    const cache = safeGet(CACHE_KEY, null);                    // zkus přečíst uloženou cache
+    if(cache && cache.data && cache.data.length){              // pokud už tu data jsou
+      ALL = cache.data;                                        // nahraj kempy z cache (bez stahování)
+      afterLoad(cache.fetchedAt);                              // vykresli seznam i mapu
+      return;                                                  // hotovo — žádné připojení k internetu
+    }
+    // Cache neexistuje = první spuštění → stáhni data
+    await downloadFresh(false);                                // false = není to ruční, ale první běh
+  }
+
+  // STAŽENÍ ČERSTVÝCH DAT — používá se při prvním spuštění a při ručním kliknutí na ↻
+  async function downloadFresh(isManual){
+    // Zobraz překryv a přepni z rotujícího spinneru na progres bar
+    showOverlay(true,
+      isManual ? 'Aktualizuji data…' : 'První spuštění — stahuji kempy…', // text podle situace
+      'Data se pak uloží do prohlížeče. Příště se načtou hned a aktualizace spustíš tlačítkem ↻.'); // podřádek
+    document.getElementById('ovspin').style.display = 'none';   // schovej spinner (máme bar)
+    document.getElementById('progWrap').classList.add('show');  // ukaž progres bar
+    setProgress(null, 'připojuji se k serveru…');               // neurčitý stav na začátku
+
+    let lastErr = null;                                         // poslední zachycená chyba
+    // Postupně zkoušej jednotlivé Overpass servery
+    for(const url of OVERPASS){
+      try{
+        // 1) Rychlý dotaz na počet kempů → víme cílový počet dopředu
+        let expectedCount = 0;                                  // očekávaný počet kempů
+        try{ expectedCount = await fetchCount(url); }           // zkus zjistit počet
+        catch(_){ /* počet nezjištěn — pokračujeme bez něj */ }
+
+        if(expectedCount){                                      // pokud počet známe
+          setOverlayMsg('Nalezeno '+expectedCount+' kempů — stahuji…'); // informuj uživatele
+        }
+        // Očekávaná velikost odpovědi v bajtech (odhad pro procenta bez Content-Length)
+        const expectedBytes = expectedCount ? expectedCount * BYTES_PER_CAMP : 0;
+
+        // 2) Hlavní stažení se streamem a průběžným progresem
+        const json = await fetchWithProgress(url, expectedBytes, expectedCount);
+
+        // 3) Zpracování
+        setProgress(1, 'zpracovávám data…');                   // 100 % a zpráva o parsování
+        ALL = parseOverpass(json);                             // převeď na naše objekty
+        const now = Date.now();                                // čas stažení
+        safeSet(CACHE_KEY, {fetchedAt:now, data:ALL});         // ulož do cache (příště se načte hned)
+        afterLoad(now);                                        // dokonči inicializaci + překreslení mapy
+        endOverlay();                                          // schovej překryv a resetuj bar
+        if(isManual) toast('Data aktualizována ✔');            // potvrzení jen u ruční akce
+        return;                                                // úspěch — konec
+      }catch(e){ lastErr = e; /* zkus další server */ }
+    }
+
+    // Sem se dostaneme jen když selhaly VŠECHNY servery
+    if(ALL && ALL.length){                                     // pokud už nějaká data máme (ruční refresh selhal)
+      endOverlay();                                            // schovej překryv
+      toast('Aktualizace se nezdařila — ponechávám stávající data'); // upozorni, nech starý stav
+    }else{
+      // První spuštění a nemáme vůbec nic → zkus poslední cache, jinak chyba
+      const cache = safeGet(CACHE_KEY, null);                  // pojistka: cache mohla vzniknout mezitím
+      if(cache && cache.data && cache.data.length){            // pokud existuje
+        ALL = cache.data;                                      // použij ji
+        afterLoad(cache.fetchedAt);                            // vykresli
+        endOverlay();                                          // schovej překryv
+        toast('Offline — použita poslední uložená data');     // info
+      }else{
+        showError(lastErr);                                    // úplně bez dat → chyba s tlačítkem Zkusit znovu
+      }
+    }
+  }
+
+  // Rychlý dotaz do Overpass na POČET kempů (out count vrací souhrn)
+  async function fetchCount(url){
+    const res = await fetch(url, {                             // odešli POST
+      method:'POST',                                           // POST
+      headers:{'Content-Type':'text/plain'},                   // tělo = text dotazu
+      body: COUNT_QUERY                                        // dotaz s "out count;"
+    });
+    if(!res.ok) throw new Error('count HTTP '+res.status);     // chybový stav
+    const j = await res.json();                                // rozparsuj
+    const tags = (j.elements && j.elements[0] && j.elements[0].tags) || {}; // prvek typu count má souhrn v tags
+    // Preferuj "total"; kdyby chybělo, sečti nodes+ways+relations
+    const total = parseInt(tags.total, 10) ||
+      ((parseInt(tags.nodes||0,10)) + (parseInt(tags.ways||0,10)) + (parseInt(tags.relations||0,10)));
+    return total || 0;                                         // vrať počet nebo 0
+  }
+
+  // Stažení hlavních dat se streamovaným čtením a průběžným hlášením postupu
+  async function fetchWithProgress(url, expectedBytes, expectedCount){
+    const res = await fetch(url, {                             // odešli hlavní dotaz
+      method:'POST',                                           // POST
+      headers:{'Content-Type':'text/plain'},                   // text tělo
+      body: QUERY                                              // hlavní dotaz s daty
+    });
+    if(!res.ok) throw new Error('HTTP '+res.status);           // chybový stav
+
+    // Kolik bajtů má odpověď dle serveru (nemusí být k dispozici u chunked přenosu)
+    const lenHeader = res.headers.get('Content-Length');       // hlavička délky
+    const totalBytes = lenHeader ? parseInt(lenHeader,10) : expectedBytes; // přesná nebo odhadovaná délka
+
+    // Pokud prohlížeč neumožní streamování těla, vezmi to najednou (bez progresu)
+    if(!res.body || !res.body.getReader){
+      setProgress(null, 'stahuji…');                           // neurčitý stav
+      return await res.json();                                 // vrať rovnou JSON
+    }
+
+    const reader = res.body.getReader();                       // čtečka datového proudu
+    const chunks = [];                                         // nasbírané kousky
+    let received = 0;                                          // počet stažených bajtů
+
+    // Čti po kouscích, dokud proud neskončí
+    while(true){
+      const {done, value} = await reader.read();               // přečti další kousek
+      if(done) break;                                          // konec proudu
+      chunks.push(value);                                      // ulož kousek
+      received += value.length;                                // přičti bajty
+
+      // Spočítej podíl (0–1): přesně z hlavičky, jinak z odhadu
+      let frac = totalBytes ? received / totalBytes : null;    // podíl nebo null (neurčitý)
+      if(frac != null && frac > 0.99) frac = 0.99;             // nedáme 100 %, dokud nedoběhne
+      // Text pod barem: buď odhad kempů, nebo jen velikost
+      const kb = Math.round(received/1024);                    // stažené kilobajty
+      let text;                                                // popisný text
+      if(expectedCount && frac != null){                       // když známe počet i podíl
+        const done = Math.min(expectedCount, Math.round(frac*expectedCount)); // odhad hotových kempů
+        text = '≈ '+done+' / '+expectedCount+' kempů • '+kb+' kB'; // "≈ 320 / 540 kempů"
+      }else{
+        const est = Math.round(received / BYTES_PER_CAMP);     // odhad počtu z počtu bajtů
+        text = '≈ '+est+' kempů staženo • '+kb+' kB';          // živě rostoucí odhad bez cílového počtu
+      }
+      setProgress(frac, text);                                 // aktualizuj bar i text
+    }
+
+    // Slož všechny kousky do jednoho pole bajtů
+    const buf = new Uint8Array(received);                      // cílový buffer
+    let pos = 0;                                               // aktuální pozice
+    for(const c of chunks){ buf.set(c, pos); pos += c.length; }// zkopíruj kousky za sebe
+    const text = new TextDecoder('utf-8').decode(buf);         // dekóduj bajty na text (UTF-8)
+    return JSON.parse(text);                                   // rozparsuj výsledný JSON
+  }
+
+  // Převod syrové Overpass odpovědi na naše zjednodušené objekty
+  function parseOverpass(json){
+    const out = [];                                             // výsledné pole
+    for(const el of (json.elements||[])){                       // projdi všechny prvky
+      const t = el.tags || {};                                  // popisky prvku
+      // Souřadnice: uzel má lat/lon přímo, plocha má center
+      const lat = el.lat != null ? el.lat : (el.center && el.center.lat); // zeměpisná šířka
+      const lon = el.lon != null ? el.lon : (el.center && el.center.lon); // zeměpisná délka
+      if(lat == null || lon == null) continue;                  // bez souřadnic prvek přeskoč
+      // Sestav adresu z OSM adresních tagů (pokud jsou)
+      const addr = composeAddr(t);                              // řetězec adresy nebo null
+      out.push({                                                // přidej objekt kempu
+        id: el.type + '/' + el.id,                              // unikátní ID (např. way/12345)
+        lat: +lat, lon: +lon,                                  // číselné souřadnice
+        name: t.name || t['name:hr'] || t['name:en'] || t.operator || 'Kemp bez názvu', // název s fallbacky
+        kind: t.tourism,                                        // camp_site nebo caravan_site
+        stars: t.stars ? parseInt(t.stars,10) : null,           // počet hvězdiček (číslo) nebo null
+        website: t.website || t['contact:website'] || null,     // oficiální web z OSM
+        phone: t.phone || t['contact:phone'] || null,           // telefon z OSM
+        email: t.email || t['contact:email'] || null,           // e-mail z OSM
+        addr: addr,                                             // adresa z OSM (nebo null)
+        city: t['addr:city'] || null,                           // město pro vyhledávání
+        region: regionOf(+lat, +lon),                           // odhadnutá oblast
+        tags: t                                                 // ponech všechny tagy pro detail
+      });
+    }
+    return out;                                                 // vrať hotové pole
+  }
+
+  // Poskládá adresu z OSM tagů addr:*; když nic není, vrátí null
+  function composeAddr(t){
+    const street = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' '); // ulice + číslo
+    const city   = [t['addr:postcode'], t['addr:city']].filter(Boolean).join(' ');      // PSČ + město
+    const parts  = [street, city].filter(Boolean);              // slož neprázdné části
+    return parts.length ? parts.join(', ') : null;              // vrať adresu nebo null
+  }
+
+  /* =========================================================================
+     INICIALIZACE MAPY
+     ========================================================================= */
+
+  function initMap(){
+    // Vytvoř mapu se středem zhruba uprostřed chorvatského pobřeží
+    map = L.map('map', {zoomControl:true}).setView([44.3, 15.6], 7); // střed a zoom
+
+    // Satelitní (fotografická) podkladová vrstva – Esri World Imagery (zdarma, bez klíče)
+    const sat = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {maxZoom:19, attribution:'Snímky © Esri'}                  // atribuce Esri
+    );
+    // Popisková vrstva navrch satelitu (názvy měst, hranice) pro lepší orientaci
+    const labels = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      {maxZoom:19}                                               // popisky
+    );
+    // Kombinovaná satelitní vrstva = snímky + popisky ve skupině
+    const satGroup = L.layerGroup([sat, labels]);               // seskupení obou vrstev
+
+    // Klasická uliční mapa OpenStreetMap
+    const street = L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {maxZoom:19, attribution:'© přispěvatelé OpenStreetMap'}   // atribuce OSM
+    );
+
+    // Přepínač podkladových vrstev vpravo nahoře
+    layers = L.control.layers(
+      {'🛰️ Satelit': satGroup, '🗺️ Mapa (OSM)': street},        // pojmenované podklady
+      null, {position:'topright'}                                // umístění ovladače
+    ).addTo(map);                                                // přidej na mapu
+
+    satGroup.addTo(map);                                         // satelit jako výchozí (chtěná fotomapa)
+
+    // Vrstva shluků značek (kvůli výkonu při stovkách bodů)
+    cluster = L.markerClusterGroup({
+      maxClusterRadius:45,                                       // poloměr shlukování v px
+      showCoverageOnHover:false                                  // nevykreslovat obal shluku při najetí
+    });
+    map.addLayer(cluster);                                       // přidej vrstvu shluků na mapu
+  }
+
+  // Vytvoří barevnou bodovou ikonu podle typu a spaní v autě
+  function iconFor(site){
+    const color = site.kind === 'caravan_site' ? 'var(--van)' : 'var(--sea)'; // fialová vs. teal
+    const ring  = carSleepAllowed(site)                          // pokud lze spát v autě
+      ? 'box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--sand);'  // přidej zlatý prstenec
+      : 'box-shadow:0 0 0 2px var(--bg);';                       // jinak jen tmavý rámeček
+    return L.divIcon({                                           // vlastní HTML ikona
+      html:`<span class="mk" style="background:${color};${ring}"></span>`, // barevný puntík
+      className:'mk-wrap',                                       // třída obalu (bez výchozích stylů)
+      iconSize:[16,16], iconAnchor:[8,8]                         // velikost a kotva na střed
+    });
+  }
+
+  /* =========================================================================
+     VYKRESLENÍ ZNAČEK NA MAPU
+     ========================================================================= */
+
+  function renderMarkers(list){
+    cluster.clearLayers();                                       // smaž staré značky
+    for(const id in markerById) delete markerById[id];          // vyprázdni rejstřík značek
+    const markers = [];                                         // dočasné pole značek
+    for(const site of list){                                    // pro každý vyfiltrovaný kemp
+      const m = L.marker([site.lat, site.lon], {icon:iconFor(site)}); // vytvoř značku s ikonou
+      m.bindPopup(popupHtml(site), {minWidth:210});             // připoj rychlý popup
+      m.on('click', ()=>{ activeId = site.id; });               // klik zapamatuje aktivní kemp
+      m.on('popupopen', (e)=>{                                   // po otevření popupu
+        const btn = e.popup.getElement().querySelector('[data-detail]'); // najdi tlačítko Detail
+        if(btn) btn.onclick = ()=> openDetail(site.id);         // navěš otevření detailu
+      });
+      markerById[site.id] = m;                                  // ulož značku do rejstříku
+      markers.push(m);                                          // přidej do dočasného pole
+    }
+    cluster.addLayers(markers);                                 // hromadně přidej všechny značky (rychlejší)
+  }
+
+  // HTML obsahu rychlého popupu nad značkou
+  function popupHtml(site){
+    const stars = site.stars ? ' • '+site.stars+'★' : '';       // hvězdičky, pokud jsou
+    const car = carSleepAllowed(site) ? '<span style="color:var(--sand)">🚗 auto OK</span>' : ''; // štítek auta
+    return `
+      <div style="font-family:system-ui">
+        <div style="font-weight:700;margin-bottom:2px">${esc(site.name)}</div>
+        <div style="font-size:11px;color:#667">${esc(site.region)}${stars}</div>
+        <div style="font-size:11px;margin:4px 0">${car}</div>
+        <button data-detail style="cursor:pointer;background:#13252c;color:#e9f1f2;border:1px solid #20363f;border-radius:7px;padding:5px 9px;font-size:12px">Detail →</button>
+      </div>`;                                                   // tlačítko otevře detailní panel
+  }
+
+  /* =========================================================================
+     VYKRESLENÍ SEZNAMU
+     ========================================================================= */
+
+  function renderList(list){
+    const el = document.getElementById('list');                 // kontejner seznamu
+    document.getElementById('count').textContent = list.length; // aktualizuj počet nahoře
+    if(!list.length){                                           // pokud nic nevyhovuje
+      el.innerHTML = '<div style="padding:24px 14px;color:var(--muted);font-size:13px">Žádný kemp neodpovídá filtrům. Zkus je uvolnit.</div>'; // prázdný stav
+      return;                                                   // konec
+    }
+    // Sestav HTML všech položek najednou (rychlejší než přidávat po jedné)
+    el.innerHTML = list.map(site=>{
+      const dotClass = site.kind === 'caravan_site' ? 'van' : 'camp'; // barva tečky podle typu
+      const stars = site.stars ? `<span class="tag">${site.stars}★</span>` : ''; // štítek hvězdiček
+      const car = carSleepAllowed(site) ? '<span class="tag auto">🚗 auto</span>' : ''; // štítek auta
+      const web = site.website ? '<span class="tag">web</span>' : '';  // štítek webu
+      return `
+        <div class="item" data-id="${site.id}">
+          <div class="nm"><span class="dot ${dotClass}"></span>${esc(site.name)}</div>
+          <div class="meta">${esc(site.region)} ${stars} ${car} ${web}</div>
+        </div>`;
+    }).join('');                                                // spoj do jednoho řetězce
+
+    // Navěš kliknutí na každou položku: otevři detail a přeleť na mapě
+    el.querySelectorAll('.item').forEach(node=>{
+      node.onclick = ()=>{                                       // reakce na klik
+        const id = node.getAttribute('data-id');                // ID kempu z atributu
+        focusSite(id);                                          // přesuň mapu a otevři detail
+      };
+    });
+  }
+
+  // Přeletí mapou na kemp, otevře jeho popup a detail
+  function focusSite(id){
+    const site = ALL.find(s=>s.id===id);                        // najdi kemp podle ID
+    if(!site) return;                                           // pojistka
+    map.flyTo([site.lat, site.lon], 15, {duration:.6});         // plynulý přelet na místo
+    const m = markerById[id];                                   // odpovídající značka
+    if(m) cluster.zoomToShowLayer(m, ()=> m.openPopup());       // rozbal shluk a otevři popup
+    openDetail(id);                                             // otevři detailní panel
+    if(window.innerWidth <= 760) closeSidebar();               // na mobilu zavři sidebar
+  }
+
+  /* =========================================================================
+     FILTROVÁNÍ
+     ========================================================================= */
+
+  function applyFilters(){
+    const q = document.getElementById('search').value.trim().toLowerCase(); // hledaný text
+    const region = document.getElementById('region').value;    // vybraná oblast
+    const minStars = parseInt(document.getElementById('stars').value,10); // minimum hvězd
+    const sortBy = document.getElementById('sort').value;      // způsob řazení
+
+    FILTERED = ALL.filter(site=>{                              // projdi všechny kempy
+      // Textové hledání v názvu a městě
+      if(q){
+        const hay = (site.name+' '+(site.city||'')+' '+site.region).toLowerCase(); // prohledávaný text
+        if(!hay.includes(q)) return false;                     // neobsahuje → vyřaď
+      }
+      // Filtr spaní v autě
+      if(flags.car && !carSleepAllowed(site)) return false;    // požaduji auto, kemp nevyhovuje
+      // Filtry typu (kemp / caravan) — pokud je aspoň jeden zapnutý, chová se jako výběr
+      if(flags.camp || flags.van){
+        const isVan = site.kind === 'caravan_site';            // je to caravan/stellplatz?
+        if(flags.camp && !flags.van && isVan) return false;    // chci jen kempy → vyřaď caravan
+        if(flags.van && !flags.camp && !isVan) return false;   // chci jen caravan → vyřaď kempy
+      }
+      // Filtr „má web" (z OSM nebo z mých editací nebo z kurátorovaného seznamu)
+      if(flags.web && !officialUrl(site)) return false;        // požaduji web, kemp žádný nemá
+      // Filtr oblasti
+      if(region && site.region !== region) return false;       // jiná oblast → vyřaď
+      // Filtr hvězdiček
+      if(minStars && (!site.stars || site.stars < minStars)) return false; // málo hvězd → vyřaď
+      return true;                                             // prošlo všemi filtry
+    });
+
+    // Seřaď výsledky podle zvoleného klíče
+    FILTERED.sort((a,b)=>{
+      if(sortBy==='stars') return (b.stars||0)-(a.stars||0);   // podle hvězd sestupně
+      if(sortBy==='region') return a.region.localeCompare(b.region,'cs') || a.name.localeCompare(b.name,'cs'); // podle oblasti
+      return a.name.localeCompare(b.name,'cs');                // výchozí A–Z
+    });
+
+    renderList(FILTERED);                                       // překresli seznam
+    renderMarkers(FILTERED);                                    // překresli značky
+  }
+
+  /* =========================================================================
+     ODKAZY (oficiální web, booking.com, mapy)
+     ========================================================================= */
+
+  // Vrátí oficiální URL: moje editace > OSM web > kurátorovaný seznam > null
+  function officialUrl(site){
+    const u = USER[site.id];                                    // moje editace
+    if(u && u.url) return u.url;                                // ruční URL má přednost
+    if(site.website) return site.website;                      // web z OSM
+    const key = site.name.toLowerCase().trim();                // normalizovaný název
+    if(CURATED_SITES[key]) return CURATED_SITES[key];          // ověřený web z našeho seznamu
+    return null;                                               // nic nemáme
+  }
+  // Booking.com – vyhledávací odkaz (funguje vždy, i bez konkrétní stránky)
+  function bookingUrl(site){
+    const q = encodeURIComponent(site.name+' '+(site.city||'')+' Hrvatska'); // dotaz do URL
+    return 'https://www.booking.com/searchresults.html?ss='+q; // odkaz na výsledky hledání
+  }
+  // Google – vyhledání oficiálního webu, když ho neznáme
+  function googleUrl(site){
+    const q = encodeURIComponent(site.name+' '+(site.city||'')+' kamp Hrvatska službena stranica'); // dotaz
+    return 'https://www.google.com/search?q='+q;               // odkaz na Google
+  }
+  // Google Maps – přesný bod pro navigaci
+  function mapsUrl(site){
+    return 'https://www.google.com/maps/search/?api=1&query='+site.lat+','+site.lon; // pin na souřadnicích
+  }
+  // Google Maps – trasa k cíli
+  function directionsUrl(site){
+    return 'https://www.google.com/maps/dir/?api=1&destination='+site.lat+','+site.lon; // navigace k bodu
+  }
+
+  /* =========================================================================
+     DETAILNÍ PANEL
+     ========================================================================= */
+
+  function openDetail(id){
+    const site = ALL.find(s=>s.id===id);                       // najdi kemp
+    if(!site) return;                                          // pojistka
+    activeId = id;                                             // zapamatuj aktivní
+    const u = USER[id] || {};                                  // moje editace pro tento kemp
+    document.getElementById('dname').textContent = site.name; // vlož název do hlavičky
+
+    const official = officialUrl(site);                        // oficiální web (pokud je)
+    const carStat = carSleepStatus(site);                     // stav spaní v autě
+    const addr = u.addr || site.addr;                         // adresa: moje editace > OSM
+
+    // Sestav vybrané zajímavé OSM tagy do přehledu
+    const infoBits = [];                                       // pole řádků info
+    if(site.stars) infoBits.push(['Hodnocení', site.stars+' ★']);            // hvězdičky
+    if(site.tags.capacity) infoBits.push(['Kapacita', site.tags.capacity]);  // kapacita míst
+    if(site.tags.internet_access && site.tags.internet_access!=='no') infoBits.push(['Wi-Fi','ano']); // wifi
+    if(site.tags.power_supply) infoBits.push(['Elektřina', site.tags.power_supply==='yes'?'ano':site.tags.power_supply]); // el. přípojka
+    if(site.tags.drinking_water) infoBits.push(['Pitná voda', site.tags.drinking_water==='yes'?'ano':site.tags.drinking_water]); // voda
+    if(site.tags.shower) infoBits.push(['Sprchy', site.tags.shower==='yes'?'ano':site.tags.shower]); // sprchy
+    if(site.tags.toilets) infoBits.push(['WC', site.tags.toilets==='yes'?'ano':site.tags.toilets]); // wc
+    if(site.tags.fee) infoBits.push(['Zpoplatněno', site.tags.fee==='yes'?'ano':site.tags.fee]); // poplatek
+    if(site.tags.opening_hours) infoBits.push(['Otevřeno', site.tags.opening_hours]); // otevírací doba
+    if(site.tags.operator) infoBits.push(['Provozovatel', site.tags.operator]); // provozovatel
+    if(site.tags.nudism && site.tags.nudism!=='no') infoBits.push(['Naturistický','ano']); // naturistický
+
+    // Sestav HTML detailu
+    document.getElementById('dbody').innerHTML = `
+      <!-- Základní zařazení -->
+      <div class="drow">
+        <div class="k">Typ • Oblast</div>
+        <div class="v">${site.kind==='caravan_site'?'Stellplatz / caravan':'Kemp'} • ${esc(site.region)}</div>
+      </div>
+
+      <!-- Adresa (z OSM, nebo dohledá se přes tlačítko) -->
+      <div class="drow">
+        <div class="k">Adresa</div>
+        <div class="v" id="addrBox">
+          ${addr ? esc(addr) : '<span style="color:var(--muted)">neuvedena — </span><button class="btn" id="geoBtn" style="padding:3px 8px;font-size:11px">Zjistit adresu</button>'}
+        </div>
+      </div>
+
+      <!-- Přesné souřadnice pro navigaci -->
+      <div class="drow">
+        <div class="k">Souřadnice (přesná poloha)</div>
+        <div class="v coords mono">${site.lat.toFixed(6)}, ${site.lon.toFixed(6)}</div>
+      </div>
+
+      <!-- Telefon, pokud je v OSM -->
+      ${site.phone ? `<div class="drow"><div class="k">Telefon</div><div class="v"><a href="tel:${esc(site.phone)}" style="color:var(--sea)">${esc(site.phone)}</a></div></div>` : ''}
+
+      <!-- Přehled vlastností z OSM -->
+      ${infoBits.length ? `<div class="drow"><div class="k">Vybavení a info (dle OSM)</div><div class="v">${infoBits.map(b=>`<div>${esc(b[0])}: ${esc(String(b[1]))}</div>`).join('')}</div></div>` : ''}
+
+      <!-- Odkazy -->
+      <div class="drow">
+        <div class="k">Odkazy</div>
+        <div class="links">
+          <a class="lnk" target="_blank" rel="noopener" href="${official || googleUrl(site)}">
+            <span class="ic">🌐</span>${official ? 'Oficiální web' : 'Najít oficiální web (Google)'}
+          </a>
+          <a class="lnk" target="_blank" rel="noopener" href="${bookingUrl(site)}">
+            <span class="ic">🏨</span>Hledat na Booking.com
+          </a>
+          <a class="lnk" target="_blank" rel="noopener" href="${mapsUrl(site)}">
+            <span class="ic">📍</span>Otevřít v Google Maps
+          </a>
+          <a class="lnk" target="_blank" rel="noopener" href="${directionsUrl(site)}">
+            <span class="ic">🧭</span>Navigovat sem
+          </a>
+        </div>
+      </div>
+
+      <!-- Moje editovatelná pole (uloží se do prohlížeče) -->
+      <div class="drow edit">
+        <div class="k">Moje doplnění</div>
+
+        <label>Cena / poznámka k ceně</label>
+        <input id="fPrice" type="text" placeholder="např. 30 €/noc za 2 os. + auto" value="${esc(u.price||'')}">
+
+        <label>Spaní v zaparkovaném autě</label>
+        <select id="fCar">
+          <option value="">— odhad: ${carStat} —</option>
+          <option value="ano" ${u.carSleep==='ano'?'selected':''}>ano (ověřeno)</option>
+          <option value="pravděpodobně" ${u.carSleep==='pravděpodobně'?'selected':''}>pravděpodobně</option>
+          <option value="ne" ${u.carSleep==='ne'?'selected':''}>ne</option>
+          <option value="neznámo" ${u.carSleep==='neznámo'?'selected':''}>neznámo</option>
+        </select>
+
+        <label>Vlastní odkaz (oficiální web)</label>
+        <input id="fUrl" type="text" placeholder="https://…" value="${esc(u.url||'')}">
+
+        <label>Poznámky</label>
+        <textarea id="fNotes" placeholder="Cokoli k tomuto kempu…">${esc(u.notes||'')}</textarea>
+
+        <button class="btn" id="saveBtn" style="margin-top:10px;border-color:var(--sea)">💾 Uložit doplnění</button>
+      </div>
+    `;
+
+    // Navěš tlačítko „Zjistit adresu" (reverzní geokódování na vyžádání)
+    const geoBtn = document.getElementById('geoBtn');          // tlačítko (pokud existuje)
+    if(geoBtn) geoBtn.onclick = ()=> reverseGeocode(site);     // klik spustí dohledání adresy
+
+    // Navěš tlačítko uložení mých editací
+    document.getElementById('saveBtn').onclick = ()=> saveDetail(id); // uloží a překreslí
+
+    // Otevři panel
+    document.getElementById('detail').classList.add('open');   // přidej třídu = zasunutí panelu
+  }
+
+  // Uloží moje editace daného kempu do USER a localStorage, pak překreslí
+  function saveDetail(id){
+    const u = USER[id] || {};                                  // stávající editace nebo prázdný objekt
+    u.price = document.getElementById('fPrice').value.trim();  // cena/poznámka k ceně
+    u.carSleep = document.getElementById('fCar').value;        // stav spaní v autě
+    u.url = document.getElementById('fUrl').value.trim();      // vlastní URL
+    u.notes = document.getElementById('fNotes').value.trim();  // poznámky
+    USER[id] = u;                                              // zapiš zpět do stavu
+    saveUser();                                                // ulož do prohlížeče
+    applyFilters();                                            // překresli (změna může ovlivnit filtry/ikony)
+    toast('Uloženo ✔');                                       // krátké potvrzení
+  }
+
+  // Reverzní geokódování přes Nominatim: ze souřadnic zjistí adresu (na vyžádání)
+  async function reverseGeocode(site){
+    const box = document.getElementById('addrBox');            // místo, kam adresu vypíšeme
+    if(box) box.innerHTML = '<span style="color:var(--muted)">Zjišťuji adresu…</span>'; // dočasný text
+    try{
+      const url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2'
+        + '&lat='+site.lat+'&lon='+site.lon+'&zoom=18&accept-language=cs'; // sestavená URL dotazu
+      const res = await fetch(url, {headers:{'Accept':'application/json'}}); // odešli požadavek
+      const j = await res.json();                              // rozparsuj odpověď
+      const addr = j.display_name || 'Adresu se nepodařilo určit'; // získaná adresa
+      const u = USER[site.id] || {};                           // moje editace
+      u.addr = addr;                                           // ulož adresu k editacím
+      USER[site.id] = u;                                       // zapiš zpět
+      saveUser();                                              // ulož do prohlížeče (příště hned)
+      if(box) box.textContent = addr;                          // zobraz výslednou adresu
+    }catch(e){
+      if(box) box.innerHTML = '<span style="color:var(--danger)">Adresu se teď nepodařilo zjistit.</span>'; // chyba
+    }
+  }
+
+  // Zavře detailní panel
+  function closeDetail(){
+    document.getElementById('detail').classList.remove('open'); // odeber třídu = panel zajede
+    activeId = null;                                            // není aktivní kemp
+  }
+
+  /* =========================================================================
+     STAVOVÉ PŘEKRYVY A DROBNOSTI
+     ========================================================================= */
+
+  // Zobrazí/skryje načítací překryv s volitelnými texty
+  function showOverlay(show, msg, sub){
+    const ov = document.getElementById('overlay');             // element překryvu
+    if(msg) document.getElementById('ovmsg').textContent = msg;// hlavní text
+    if(sub) document.getElementById('ovsub').textContent = sub;// podřádek
+    ov.classList.toggle('show', show);                         // zapni/vypni zobrazení
+  }
+
+  // Změní jen hlavní hlášku překryvu (během stahování)
+  function setOverlayMsg(msg){
+    document.getElementById('ovmsg').textContent = msg;        // přepiš hlavní text
+  }
+
+  // Nastaví progres bar: frac = 0..1 (nebo null = neurčitý), text = popisek pod barem
+  function setProgress(frac, text){
+    const track = document.getElementById('progTrack');        // dráha baru
+    const fill = document.getElementById('progFill');          // výplň baru
+    const pct = document.getElementById('progPct');            // velké procento
+    const txt = document.getElementById('progText');           // popisný řádek
+    if(frac == null){                                          // neurčitý stav (neznáme celek)
+      track.classList.add('indet');                            // zapni jezdící animaci
+      pct.textContent = '…';                                   // místo procent tři tečky
+    }else{
+      track.classList.remove('indet');                         // vypni animaci
+      const p = Math.max(0, Math.min(100, Math.round(frac*100))); // procenta 0–100
+      fill.style.width = p + '%';                              // šířka výplně
+      pct.textContent = p + ' %';                              // text procent
+    }
+    if(text != null) txt.textContent = text;                   // aktualizuj popisek
+  }
+
+  // Ukončí překryv po úspěchu: schová ho a připraví bar na příště
+  function endOverlay(){
+    showOverlay(false);                                        // schovej překryv
+    document.getElementById('progWrap').classList.remove('show'); // schovej bar
+    setProgress(0, '');                                        // resetuj bar na nulu
+  }
+
+  // Zobrazí chybovou hlášku s možností zkusit znovu
+  function showError(err){
+    showOverlay(true,
+      'Data se teď nepodařilo stáhnout.',                      // hlavní hláška
+      'Zkontroluj připojení k internetu a zkus to znovu. (Pokud běžíš v náhledu Claude, spusť soubor přímo v prohlížeči.)'); // rada
+    const ov = document.getElementById('overlay');             // překryv
+    document.getElementById('progWrap').classList.remove('show'); // schovej progres bar
+    document.getElementById('ovspin').style.display = 'none';  // schovej spinner u chyby
+    // Přidej tlačítko pro opakování, pokud tam ještě není
+    if(!document.getElementById('retryBtn')){
+      const b = document.createElement('button');              // vytvoř tlačítko
+      b.id = 'retryBtn'; b.className='btn'; b.textContent='↻ Zkusit znovu'; // nastav vlastnosti
+      b.onclick = ()=>{ b.remove(); downloadFresh(false); };   // klik: odeber tlačítko a stáhni znovu
+      ov.appendChild(b);                                       // přidej do překryvu
+    }
+  }
+
+  // Krátké potvrzovací hlášení (toast) vpravo dole
+  function toast(text){
+    const t = document.createElement('div');                   // vytvoř element
+    t.textContent = text;                                      // vlož text
+    // Inline styl toastu
+    t.style.cssText = 'position:absolute;right:16px;bottom:16px;z-index:2000;background:var(--sea);color:#04231f;font-weight:600;padding:9px 14px;border-radius:9px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.4)';
+    document.body.appendChild(t);                              // přidej na stránku
+    setTimeout(()=> t.remove(), 1600);                         // po 1,6 s odeber
+  }
+
+  // Escapování textu do HTML (ochrana proti rozbití rozvržení uvozovkami apod.)
+  function esc(s){
+    return String(s==null?'':s)                                // převeď na řetězec
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')              // nahraď & a <
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');            // nahraď > a "
+  }
+
+  // Naplní rozbalovací seznam oblastí podle skutečně přítomných kempů
+  function fillRegions(){
+    const set = new Set(ALL.map(s=>s.region));                 // unikátní oblasti
+    const sel = document.getElementById('region');            // element selectu
+    [...set].sort((a,b)=>a.localeCompare(b,'cs')).forEach(r=>{ // seřaď abecedně
+      const o = document.createElement('option');             // vytvoř možnost
+      o.value = r; o.textContent = r;                         // hodnota i text = název oblasti
+      sel.appendChild(o);                                     // přidej do selectu
+    });
+  }
+
+  // Otevře/zavře sidebar na mobilu
+  function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); } // zavření
+
+  /* =========================================================================
+     DOKONČENÍ NAČTENÍ + STATUS
+     ========================================================================= */
+
+  function afterLoad(fetchedAt){
+    fillRegions();                                             // naplň oblasti
+    applyFilters();                                           // první vykreslení seznamu a značek
+    // Aktualizuj stavový text nahoře (počet + čas)
+    const when = fetchedAt ? new Date(fetchedAt).toLocaleString('cs-CZ') : '—'; // formátovaný čas
+    document.getElementById('status').textContent =
+      ALL.length + ' kempů • data z ' + when;                 // text stavu
+    showOverlay(false);                                       // pro jistotu schovej překryv
+  }
+
+  /* =========================================================================
+     NAVĚŠENÍ UDÁLOSTÍ (ovládací prvky)
+     ========================================================================= */
+
+  function wireUI(){
+    // Vyhledávací pole: filtruj při psaní
+    document.getElementById('search').addEventListener('input', applyFilters);
+    // Změna oblasti / hvězd / řazení: přefiltruj
+    document.getElementById('region').addEventListener('change', applyFilters);
+    document.getElementById('stars').addEventListener('change', applyFilters);
+    document.getElementById('sort').addEventListener('change', applyFilters);
+
+    // Přepínatelné pilulky (filtry)
+    document.querySelectorAll('.pill').forEach(p=>{
+      p.addEventListener('click', ()=>{
+        const f = p.getAttribute('data-filter');              // který filtr pilulka ovládá
+        flags[f] = !flags[f];                                 // přepni jeho stav
+        p.classList.toggle('on', flags[f]);                   // vizuálně zvýrazni/zruš
+        applyFilters();                                       // přefiltruj
+      });
+    });
+
+    // Tlačítko aktualizace dat: ručně stáhni čerstvá data z OpenStreetMap
+    document.getElementById('refresh').addEventListener('click', ()=> downloadFresh(true));
+
+    // Zavření detailu (křížek)
+    document.getElementById('dclose').addEventListener('click', closeDetail);
+
+    // Mobilní tlačítko menu: otevři/zavři sidebar
+    document.getElementById('sbtoggle').addEventListener('click', ()=>{
+      document.getElementById('sidebar').classList.toggle('open'); // přepni třídu open
+    });
+
+    // Klávesa Esc zavře detail
+    document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDetail(); });
+  }
+
+  /* =========================================================================
+     START APLIKACE
+     ========================================================================= */
+
+  initMap();   // vytvoř mapu a vrstvy
+  wireUI();    // navěš ovládací prvky
+  loadData();  // načti data (z cache nebo z internetu)
+
+  </script>
+</body>
+</html>
