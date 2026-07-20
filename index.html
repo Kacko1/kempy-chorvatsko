@@ -345,7 +345,7 @@
         <div id="legend">
           <div class="lg"><span class="dot camp"></span> Kemp</div>
           <div class="lg"><span class="dot van"></span> Stellplatz / caravan</div>
-          <div class="lg"><span class="mk" style="width:12px;height:12px;background:var(--sea);box-shadow:0 0 0 2px var(--sand)"></span> zlatý prstenec = lze spát v autě</div>
+          <div class="lg"><span class="mk" style="width:12px;height:12px;background:var(--sea);box-shadow:0 0 0 2px var(--sand)"></span> zlatý prstenec = spaní v autě (caravan/stellplatz + tebou potvrzené)</div>
         </div>
       </div>
     </div>
@@ -475,17 +475,22 @@
      ODVOZENÍ „SPANÍ V AUTĚ" A DALŠÍCH VLASTNOSTÍ
      ========================================================================= */
 
-  // Zjistí stav spaní v autě: nejdřív moje editace, jinak odhad podle typu
+  // Zjistí stav spaní v autě: nejdřív moje editace, pak OSM data, jinak neznámo
   function carSleepStatus(site){
     const u = USER[site.id];                                    // moje uložená editace
-    if(u && u.carSleep) return u.carSleep;                      // pokud jsem ho ručně nastavil, má přednost
-    if(site.kind === 'caravan_site') return 'ano';              // stellplatz/caravan = navrženo pro vozidla
-    return 'pravděpodobně';                                     // běžný kemp v Chorvatsku obvykle auto+stan dovolí
+    if(u && u.carSleep) return u.carSleep;                      // ruční nastavení má vždy přednost
+    if(site.kind === 'caravan_site') return 'ano';              // stellplatz/caravan = přímo pro vozidla
+    const t = site.tags || {};                                  // OSM tagy kempu
+    // OSM výslovně potvrzuje karavany/obytné vozy/vjezd vozidel → ano
+    if(t.caravans === 'yes' || t.motorhome === 'yes' || t.motor_vehicle === 'yes') return 'ano';
+    // OSM říká „jen stany, karavany ne" → ne
+    if(t.caravans === 'no' && t.tents === 'yes') return 'ne';
+    return 'neznámo';                                           // běžný kemp bez informace = zatím neznámo
   }
-  // Má se kemp zobrazit ve filtru „spaní v autě"? (ano nebo pravděpodobně)
+  // Má se kemp zobrazit ve filtru „spaní v autě"? (ano nebo tebou potvrzené pravděpodobně)
   function carSleepAllowed(site){
     const s = carSleepStatus(site);                             // aktuální stav
-    return s === 'ano' || s === 'pravděpodobně';               // „ne" a „neznámo" se odfiltrují
+    return s === 'ano' || s === 'pravděpodobně';               // „ne", „neznámo" se odfiltrují
   }
 
   /* =========================================================================
