@@ -253,6 +253,15 @@
     /* Tlačítko pro otevření sidebaru na mobilu (skryté na desktopu) */
     #sbtoggle{display:none}
 
+    /* Mobilní lišta v menu se zavíracím tlačítkem (skrytá na desktopu) */
+    #sbmobilehead{display:none;align-items:center;justify-content:space-between;margin-bottom:10px} /* jen mobil */
+    #sbmobilehead span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px} /* nadpis */
+    #sbmobilehead #sbClose{border-color:var(--sea);color:var(--ink)}  /* zvýrazněné zavírací tlačítko */
+
+    /* Ztmavené pozadí za mobilním menu (skryté, dokud se menu neotevře) */
+    #sbBackdrop{display:none;position:absolute;inset:0;z-index:1350;background:rgba(0,0,0,.45)} /* překryv pod menu */
+    #sbBackdrop.show{display:block}                             /* zobrazí se s otevřeným menu */
+
     /* ===== Responzivita: úzké obrazovky (mobil) ===== */
     @media (max-width:760px){
       #sidebar{
@@ -262,6 +271,7 @@
       }
       #sidebar.open{transform:translateX(0)}                    /* otevřený sidebar */
       #sbtoggle{display:inline-flex}                            /* tlačítko menu se zobrazí */
+      #sbmobilehead{display:flex}                               /* v menu se ukáže zavírací lišta */
       #detail{width:100%}                                       /* detail přes celou šířku */
       #status{display:none}                                     /* stav skryjeme kvůli místu */
     }
@@ -293,6 +303,11 @@
       <aside id="sidebar">
         <!-- Sekce filtrů -->
         <div id="filters">
+          <!-- Mobilní lišta se zavíracím tlačítkem (na desktopu skrytá) -->
+          <div id="sbmobilehead">
+            <span>Filtry</span>
+            <button id="sbClose" class="btn">Zobrazit mapu ✕</button>
+          </div>
           <!-- Vyhledávací pole podle názvu / města -->
           <input id="search" type="text" placeholder="Hledat kemp nebo město…">
 
@@ -338,6 +353,9 @@
         <!-- Vlastní seznam kempů (naplní JS) -->
         <div id="list"></div>
       </aside>
+
+      <!-- Ztmavené pozadí za mobilním menu: klepnutím se menu zavře (na desktopu se nezobrazuje) -->
+      <div id="sbBackdrop"></div>
 
       <!-- Mapa a její překryvy -->
       <div id="map">
@@ -1127,8 +1145,21 @@
     });
   }
 
-  // Otevře/zavře sidebar na mobilu
-  function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); } // zavření
+  // Otevře mobilní menu (sidebar + ztmavené pozadí)
+  function openSidebar(){
+    document.getElementById('sidebar').classList.add('open');   // zasuň panel
+    document.getElementById('sbBackdrop').classList.add('show'); // ukaž pozadí
+  }
+  // Zavře mobilní menu (sidebar + pozadí)
+  function closeSidebar(){
+    document.getElementById('sidebar').classList.remove('open');   // zasuň panel zpět
+    document.getElementById('sbBackdrop').classList.remove('show'); // schovej pozadí
+  }
+  // Přepne mobilní menu (podle aktuálního stavu)
+  function toggleSidebar(){
+    const open = document.getElementById('sidebar').classList.contains('open'); // je otevřené?
+    if(open) closeSidebar(); else openSidebar();                  // přepni
+  }
 
   /* =========================================================================
      DOKONČENÍ NAČTENÍ + STATUS
@@ -1172,10 +1203,12 @@
     // Zavření detailu (křížek)
     document.getElementById('dclose').addEventListener('click', closeDetail);
 
-    // Mobilní tlačítko menu: otevři/zavři sidebar
-    document.getElementById('sbtoggle').addEventListener('click', ()=>{
-      document.getElementById('sidebar').classList.toggle('open'); // přepni třídu open
-    });
+    // Mobilní tlačítko menu: otevři/zavři sidebar (i s pozadím)
+    document.getElementById('sbtoggle').addEventListener('click', toggleSidebar);
+    // Zavírací tlačítko uvnitř menu („Zobrazit mapu ✕")
+    document.getElementById('sbClose').addEventListener('click', closeSidebar);
+    // Klepnutí na ztmavené pozadí menu ho zavře
+    document.getElementById('sbBackdrop').addEventListener('click', closeSidebar);
 
     // Klávesa Esc zavře detail
     document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDetail(); });
