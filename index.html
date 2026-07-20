@@ -277,8 +277,13 @@
     /* Řádek s odhadem počtu kempů a velikostí */
     #progText{font-size:11.5px;color:var(--muted)}              /* detailní text */
 
-    /* Tlačítko pro otevření sidebaru na mobilu (skryté na desktopu) */
-    #sbtoggle{display:none}
+    /* Tlačítko pro skrytí/zobrazení levého menu (na všech velikostech) */
+    #sbtoggle{display:inline-flex}
+
+    /* Na velké obrazovce: sbalené menu = sidebar se schová a mapa se roztáhne */
+    @media (min-width:761px){
+      #body.sb-collapsed #sidebar{display:none}                 /* skrytý sidebar */
+    }
 
     /* Mobilní lišta v menu se zavíracím tlačítkem (skrytá na desktopu) */
     #sbmobilehead{display:none;align-items:center;justify-content:space-between;margin-bottom:10px} /* jen mobil */
@@ -297,7 +302,6 @@
         box-shadow:2px 0 20px rgba(0,0,0,.5);
       }
       #sidebar.open{transform:translateX(0)}                    /* otevřený sidebar */
-      #sbtoggle{display:inline-flex}                            /* tlačítko menu se zobrazí */
       #sbmobilehead{display:flex}                               /* v menu se ukáže zavírací lišta */
       #detail{width:100%}                                       /* detail přes celou šířku */
       #status{display:none}                                     /* stav skryjeme kvůli místu */
@@ -311,7 +315,7 @@
     <!-- Horní lišta -->
     <div id="topbar">
       <!-- Tlačítko menu (jen mobil): otevře/zavře sidebar -->
-      <button id="sbtoggle" class="btn" title="Filtry a seznam">☰</button>
+      <button id="sbtoggle" class="btn" title="Skrýt / zobrazit menu">☰</button>
       <!-- Název a podtitulek aplikace -->
       <div id="brand">
         <b>Kempy Chorvatsko</b>
@@ -1327,10 +1331,15 @@
     document.getElementById('sidebar').classList.remove('open');   // zasuň panel zpět
     document.getElementById('sbBackdrop').classList.remove('show'); // schovej pozadí
   }
-  // Přepne mobilní menu (podle aktuálního stavu)
+  // Přepne levé menu — na mobilu vysouvací překryv, na velké obrazovce sbalení
   function toggleSidebar(){
-    const open = document.getElementById('sidebar').classList.contains('open'); // je otevřené?
-    if(open) closeSidebar(); else openSidebar();                  // přepni
+    if(window.matchMedia('(max-width:760px)').matches){          // malá obrazovka = překryv
+      const open = document.getElementById('sidebar').classList.contains('open'); // je otevřené?
+      if(open) closeSidebar(); else openSidebar();               // přepni překryv
+    }else{                                                       // velká obrazovka = sbalení
+      document.getElementById('body').classList.toggle('sb-collapsed'); // schovej/ukaž menu
+      setTimeout(()=>{ if(map) map.invalidateSize(); }, 60);     // po reflow přepočítej mapu
+    }
   }
 
   /* =========================================================================
