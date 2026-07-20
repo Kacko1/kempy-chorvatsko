@@ -170,17 +170,23 @@
       background:#fff;color:#333;                             /* světlé pozadí jako ostatní ovládání */
     }
     .locate-ctl.active a{background:var(--sea)}               /* zapnuto = teal pozadí */
-    /* Modrá tečka mojí polohy s pulzujícím kruhem */
-    .loc-dot{
-      width:16px;height:16px;border-radius:50%;               /* kruh */
-      background:#38bdf8;border:2px solid #fff;                /* modrá s bílým rámečkem */
-      box-shadow:0 0 0 0 rgba(56,189,248,.5);                 /* výchozí stín pro animaci */
-      animation:locpulse 1.6s infinite;                       /* pulzování */
+    /* Značka mojí polohy ve stylu Google Map: modré jádro + bílý prstenec + pulzující svatozář */
+    .loc-wrap{position:relative;width:22px;height:22px}          /* obal značky */
+    .loc-core{
+      position:absolute;left:50%;top:50%;width:14px;height:14px; /* jádro uprostřed */
+      transform:translate(-50%,-50%);border-radius:50%;          /* kruh přesně na střed */
+      background:#2563eb;border:2.5px solid #fff;                /* sytě modré jádro s bílým rámečkem */
+      box-shadow:0 1px 4px rgba(0,0,0,.45);                      /* jemný stín, ať vystoupí z mapy */
     }
-    @keyframes locpulse{                                      /* rozpínající se kruh kolem tečky */
-      0%{box-shadow:0 0 0 0 rgba(56,189,248,.5)}
-      70%{box-shadow:0 0 0 16px rgba(56,189,248,0)}
-      100%{box-shadow:0 0 0 0 rgba(56,189,248,0)}
+    .loc-pulse{
+      position:absolute;left:50%;top:50%;width:14px;height:14px; /* svatozář začíná ve velikosti jádra */
+      transform:translate(-50%,-50%);border-radius:50%;          /* kruh na střed */
+      background:rgba(37,99,235,.35);                            /* poloprůhledná modrá */
+      animation:locpulse 1.8s ease-out infinite;                 /* pomalé rozpínání */
+    }
+    @keyframes locpulse{                                         /* svatozář se rozpíná a mizí */
+      0%{width:14px;height:14px;opacity:.6}
+      100%{width:46px;height:46px;opacity:0}
     }
 
     /* Přebarvení shluků značek do tématu aplikace */
@@ -833,9 +839,13 @@
     if(locCircle){ map.removeLayer(locCircle); locCircle = null; } // odeber kruh
   }
 
-  // Ikona mojí polohy = pulzující modrá tečka
+  // Ikona mojí polohy = modré jádro s bílým prstencem a pulzující svatozáří
   function locIcon(){
-    return L.divIcon({html:'<span class="loc-dot"></span>', className:'', iconSize:[16,16], iconAnchor:[8,8]});
+    return L.divIcon({
+      html:'<div class="loc-wrap"><span class="loc-pulse"></span><span class="loc-core"></span></div>', // dvě vrstvy: svatozář + jádro
+      className:'',                                             // bez výchozího bílého rámečku Leafletu
+      iconSize:[22,22], iconAnchor:[11,11]                      // velikost a kotva přesně na střed
+    });
   }
 
   // Vytvoří barevnou bodovou ikonu podle typu a spaní v autě
