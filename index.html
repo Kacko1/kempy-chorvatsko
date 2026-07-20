@@ -163,6 +163,26 @@
     /* Vlastní vzhled bodové značky (barevný puntík) */
     .mk{display:block;width:14px;height:14px;border-radius:50%;border:2px solid var(--bg)} /* kroužek s tmavým rámem */
 
+    /* Tlačítko „Moje poloha" v mapě (řadí se pod ovládání zoomu) */
+    .locate-ctl a{
+      display:flex;align-items:center;justify-content:center; /* vycentruj ikonu */
+      width:30px;height:30px;font-size:15px;                  /* rozměr shodný s tlačítky Leafletu */
+      background:#fff;color:#333;                             /* světlé pozadí jako ostatní ovládání */
+    }
+    .locate-ctl.active a{background:var(--sea)}               /* zapnuto = teal pozadí */
+    /* Modrá tečka mojí polohy s pulzujícím kruhem */
+    .loc-dot{
+      width:16px;height:16px;border-radius:50%;               /* kruh */
+      background:#38bdf8;border:2px solid #fff;                /* modrá s bílým rámečkem */
+      box-shadow:0 0 0 0 rgba(56,189,248,.5);                 /* výchozí stín pro animaci */
+      animation:locpulse 1.6s infinite;                       /* pulzování */
+    }
+    @keyframes locpulse{                                      /* rozpínající se kruh kolem tečky */
+      0%{box-shadow:0 0 0 0 rgba(56,189,248,.5)}
+      70%{box-shadow:0 0 0 16px rgba(56,189,248,0)}
+      100%{box-shadow:0 0 0 0 rgba(56,189,248,0)}
+    }
+
     /* Přebarvení shluků značek do tématu aplikace */
     .marker-cluster{background:rgba(45,212,191,.25)}         /* vnější kruh shluku */
     .marker-cluster div{background:rgba(45,212,191,.85);color:#04231f;font-weight:700} /* vnitřní kruh s číslem */
@@ -736,6 +756,86 @@
       showCoverageOnHover:false                                  // nevykreslovat obal shluku při najetí
     });
     map.addLayer(cluster);                                       // přidej vrstvu shluků na mapu
+
+    initLocate();                                                // přidej ovládání „Moje poloha"
+  }
+
+  /* =========================================================================
+     MOJE POLOHA (geolokace prohlížeče přes Leaflet)
+     ========================================================================= */
+
+  let locating = false;        // je sledování polohy zapnuté?
+  let locFirstFix = true;      // je tohle první zaměření (kvůli přeletu mapy)?
+  let locMarker = null;        // značka mojí polohy (modrá tečka)
+  let locCircle = null;        // kruh přesnosti kolem tečky
+  let locateEl = null;         // DOM tlačítka (kvůli zvýraznění aktivního stavu)
+
+  function initLocate(){
+    // Vytvoř vlastní ovládací tlačítko Leafletu vlevo nahoře (pod zoomem)
+    const Ctl = L.Control.extend({                              // rozšiř základní Leaflet Control
+      options:{position:'topleft'},                             // umístění v rohu s ovládáním zoomu
+      onAdd:function(){                                          // co se vykreslí
+        const box = L.DomUtil.create('div','leaflet-bar locate-ctl'); // obal ve stylu tlačítek Leafletu
+        const a = L.DomUtil.create('a','',box);                 // klikací prvek
+        a.href = '#';                                           // odkaz (kvůli vzhledu)
+        a.title = 'Moje poloha';                                // tooltip
+        a.innerHTML = '📍';                                     // ikona
+        L.DomEvent.on(a,'click',L.DomEvent.stop)                // zastav výchozí chování odkazu
+                  .on(a,'click', toggleLocate);                 // klik přepne sledování polohy
+        locateEl = box;                                         // ulož si obal pro zvýraznění
+        return box;                                             // vrať element do mapy
+      }
+    });
+    map.addControl(new Ctl());                                  // přidej tlačítko na mapu
+
+    // Když Leaflet najde polohu, aktualizuj tečku i kruh přesnosti
+    map.on('locationfound', e=>{
+      const r = e.accuracy || 0;                                // přesnost v metrech
+      if(!locMarker){                                           // tečka ještě není → vytvoř ji
+        locMarker = L.marker(e.latlng, {icon:locIcon(), zIndexOffset:1000}).addTo(map); // nad ostatními
+      }else{
+        locMarker.setLatLng(e.latlng);                          // jinak jen posuň
+      }
+      if(!locCircle){                                           // kruh přesnosti ještě není → vytvoř
+        locCircle = L.circle(e.latlng, {radius:r, color:'#38bdf8', fillColor:'#38bdf8', fillOpacity:.12, weight:1}).addTo(map);
+      }else{
+        locCircle.setLatLng(e.latlng); locCircle.setRadius(r);  // jinak posuň a přenastav poloměr
+      }
+      if(locFirstFix){                                          // při prvním zaměření přeleť na polohu
+        map.flyTo(e.latlng, Math.max(map.getZoom(), 14), {duration:.6}); // přiblížení na mě
+        locFirstFix = false;                                    // příště už nepřelétávej (ať se dá mapa posouvat)
+      }
+    });
+
+    // Když se poloha nepodaří získat, vypni sledování a upozorni
+    map.on('locationerror', ()=>{
+      stopLocate();                                             // ukliď stav
+      toast('Polohu se nepodařilo získat — povol přístup k poloze a otevři appku přes https.'); // rada
+    });
+  }
+
+  // Přepínač tlačítka: zapne/vypne sledování polohy
+  function toggleLocate(){
+    if(locating){ stopLocate(); return; }                       // už běží → vypni
+    locating = true;                                            // označ jako zapnuté
+    locFirstFix = true;                                         // příští fix přeletí mapu
+    if(locateEl) locateEl.classList.add('active');              // zvýrazni tlačítko
+    // watch:true = průběžné sledování; enableHighAccuracy = přesnější GPS
+    map.locate({watch:true, enableHighAccuracy:true, maxZoom:15}); // spusť geolokaci
+  }
+
+  // Zastaví sledování a odstraní tečku i kruh
+  function stopLocate(){
+    locating = false;                                           // vypnuto
+    if(locateEl) locateEl.classList.remove('active');           // zruš zvýraznění
+    map.stopLocate();                                           // zastav geolokaci
+    if(locMarker){ map.removeLayer(locMarker); locMarker = null; } // odeber tečku
+    if(locCircle){ map.removeLayer(locCircle); locCircle = null; } // odeber kruh
+  }
+
+  // Ikona mojí polohy = pulzující modrá tečka
+  function locIcon(){
+    return L.divIcon({html:'<span class="loc-dot"></span>', className:'', iconSize:[16,16], iconAnchor:[8,8]});
   }
 
   // Vytvoří barevnou bodovou ikonu podle typu a spaní v autě
@@ -905,6 +1005,12 @@
   function directionsUrl(site){
     return 'https://www.google.com/maps/dir/?api=1&destination='+site.lat+','+site.lon; // navigace k bodu
   }
+  // Google Maps – vyhledání zadané ADRESY (textově, ne podle souřadnic)
+  function addrMapsUrl(addr){
+    // Když adresa neobsahuje zemi, přidej „Hrvatska" pro přesnější výsledek
+    const q = /hrvatsk|croatia|chorvat/i.test(addr) ? addr : (addr + ', Hrvatska');
+    return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q); // odkaz na hledání adresy
+  }
 
   /* =========================================================================
      DETAILNÍ PANEL
@@ -943,11 +1049,13 @@
         <div class="v">${site.kind==='caravan_site'?'Stellplatz / caravan':'Kemp'} • ${esc(site.region)}</div>
       </div>
 
-      <!-- Adresa (z OSM, nebo dohledá se přes tlačítko) -->
+      <!-- Adresa (z OSM, nebo dohledá se přes tlačítko) — klikatelná = hledání na Google Maps -->
       <div class="drow">
-        <div class="k">Adresa</div>
+        <div class="k">Adresa <span style="text-transform:none;letter-spacing:0">(klepnutím zobrazíš na Google Maps)</span></div>
         <div class="v" id="addrBox">
-          ${addr ? esc(addr) : '<span style="color:var(--muted)">neuvedena — </span><button class="btn" id="geoBtn" style="padding:3px 8px;font-size:11px">Zjistit adresu</button>'}
+          ${addr
+            ? `<a href="${addrMapsUrl(addr)}" target="_blank" rel="noopener" title="Zobrazit adresu na Google Maps" style="color:var(--sea);text-decoration:none">${esc(addr)} ↗</a>`
+            : '<span style="color:var(--muted)">neuvedena — </span><button class="btn" id="geoBtn" style="padding:3px 8px;font-size:11px">Zjistit adresu</button>'}
         </div>
       </div>
 
@@ -1046,7 +1154,13 @@
       u.addr = addr;                                           // ulož adresu k editacím
       USER[site.id] = u;                                       // zapiš zpět
       saveUser();                                              // ulož do prohlížeče (příště hned)
-      if(box) box.textContent = addr;                          // zobraz výslednou adresu
+      if(box){                                                 // zobraz adresu jako klikací odkaz na Google Maps
+        if(j.display_name){
+          box.innerHTML = '<a href="'+addrMapsUrl(addr)+'" target="_blank" rel="noopener" title="Zobrazit adresu na Google Maps" style="color:var(--sea);text-decoration:none">'+esc(addr)+' ↗</a>';
+        }else{
+          box.textContent = addr;                              // když se nenašla, jen text bez odkazu
+        }
+      }
     }catch(e){
       if(box) box.innerHTML = '<span style="color:var(--danger)">Adresu se teď nepodařilo zjistit.</span>'; // chyba
     }
