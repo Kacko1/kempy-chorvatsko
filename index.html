@@ -579,12 +579,14 @@
       ]},
 
     // Příroda
-    nature: { label:'🌲 Příroda', accent:'#34d399', noun:'míst', cacheKey:'hr_nature_v1',
+    nature: { label:'🌲 Příroda', accent:'#34d399', noun:'míst', cacheKey:'hr_nature_v2',
       cats:[
         {key:'park', label:'🌲 Národní a přírodní parky', color:'#22c55e', sel:['boundary=national_park','leisure=nature_reserve'], match:t=>t.boundary==='national_park'||t.leisure==='nature_reserve'},
         {key:'view', label:'🌅 Vyhlídky a západy slunce', color:'#f59e0b', sel:['tourism=viewpoint'], match:t=>t.tourism==='viewpoint'},
         {key:'water', label:'💧 Vodopády a koupání', color:'#38bdf8', sel:['natural=waterfall','natural=spring','natural=hot_spring'], match:t=>['waterfall','spring','hot_spring'].includes(t.natural)},
-        {key:'beach', label:'🏖️ Pláže', color:'#22d3ee', sel:['natural=beach','leisure=beach_resort'], match:t=>t.natural==='beach'||t.leisure==='beach_resort'}
+        {key:'beach', label:'🏖️ Pláže', color:'#22d3ee', sel:['natural=beach','leisure=beach_resort'], match:t=>t.natural==='beach'||t.leisure==='beach_resort'},
+        {key:'peak', label:'🏔️ Vrcholy', color:'#a8a29e', sel:['natural=peak'], match:t=>t.natural==='peak'},
+        {key:'cave', label:'🕳️ Jeskyně', color:'#c084fc', sel:['natural=cave_entrance'], match:t=>t.natural==='cave_entrance'}
       ]},
 
     // Jídlo a parkování
