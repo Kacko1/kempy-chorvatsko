@@ -148,6 +148,7 @@
       background:var(--bg);border:1px solid var(--line);color:var(--muted); /* výchozí barvy */
     }
     .tag.auto{background:rgba(245,184,65,.14);border-color:var(--sand);color:var(--sand)} /* štítek „auto" = zlatá */
+    .tag.dist{background:rgba(45,212,191,.14);border-color:var(--sea);color:var(--sea);font-weight:600} /* štítek vzdálenosti = teal */
 
     /* ===== Mapa ===== */
     #map{flex:1 1 auto;min-width:0;background:#08131a}       /* mapa zabírá zbytek šířky */
@@ -371,6 +372,7 @@
           <!-- Výběr řazení seznamu -->
           <select id="sort" class="mini">
             <option value="name">A–Z</option>
+            <option value="dist">Nejbližší (dle mé polohy)</option>
             <option value="stars">Hvězdičky</option>
             <option value="region">Oblast</option>
           </select>
@@ -775,6 +777,8 @@
   let locMarker = null;        // značka mojí polohy (modrá tečka)
   let locCircle = null;        // kruh přesnosti kolem tečky
   let locateEl = null;         // DOM tlačítka (kvůli zvýraznění aktivního stavu)
+  let userLoc = null;          // moje poslední známá poloha {lat, lon} (pro vzdálenosti)
+  let lastAppliedLoc = null;   // poloha, se kterou se naposledy přepočítal seznam
 
   function initLocate(){
     // Vytvoř vlastní ovládací tlačítko Leafletu vlevo nahoře (pod zoomem)
@@ -811,6 +815,16 @@
         map.flyTo(e.latlng, Math.max(map.getZoom(), 14), {duration:.6}); // přiblížení na mě
         locFirstFix = false;                                    // příště už nepřelétávej (ať se dá mapa posouvat)
       }
+      // Ulož polohu a případně přepočítej seznam (vzdálenosti / řazení „Nejbližší")
+      const prev = userLoc;                                     // předchozí poloha
+      userLoc = {lat:e.latlng.lat, lon:e.latlng.lng};           // nová poloha
+      const sortBy = document.getElementById('sort').value;     // aktuální řazení
+      const moved = prev ? haversine(prev.lat,prev.lon,userLoc.lat,userLoc.lon) : Infinity; // o kolik jsem se posunul
+      // Přepočítej při úplně prvním fixu, nebo když se u řazení dle vzdálenosti posunu o >200 m
+      if(!lastAppliedLoc || (sortBy==='dist' && moved>200)){
+        lastAppliedLoc = userLoc;                               // zapamatuj polohu přepočtu
+        applyFilters();                                         // překresli seznam (přidá/aktualizuje vzdálenosti)
+      }
     });
 
     // Když se poloha nepodaří získat, vypni sledování a upozorni
@@ -822,7 +836,11 @@
 
   // Přepínač tlačítka: zapne/vypne sledování polohy
   function toggleLocate(){
-    if(locating){ stopLocate(); return; }                       // už běží → vypni
+    if(locating) stopLocate(); else startLocate();              // podle stavu přepni
+  }
+  // Spustí sledování polohy (použije tlačítko i řazení „Nejbližší")
+  function startLocate(){
+    if(locating) return;                                        // už běží → nic
     locating = true;                                            // označ jako zapnuté
     locFirstFix = true;                                         // příští fix přeletí mapu
     if(locateEl) locateEl.classList.add('active');              // zvýrazni tlačítko
@@ -846,6 +864,29 @@
       className:'',                                             // bez výchozího bílého rámečku Leafletu
       iconSize:[22,22], iconAnchor:[11,11]                      // velikost a kotva přesně na střed
     });
+  }
+
+  /* =========================================================================
+     VZDÁLENOST OD MOJÍ POLOHY
+     ========================================================================= */
+
+  // Vzdálenost dvou bodů na kouli (haversine), výsledek v metrech
+  function haversine(lat1, lon1, lat2, lon2){
+    const R = 6371000, toR = Math.PI/180;                       // poloměr Země v m a převod na radiány
+    const dLat = (lat2-lat1)*toR, dLon = (lon2-lon1)*toR;       // rozdíly v radiánech
+    const a = Math.sin(dLat/2)**2 +                             // haversine vzorec
+      Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));                         // vzdálenost v metrech
+  }
+  // Vzdálenost kempu od mojí polohy (metry) nebo null, když polohu neznám
+  function distTo(site){
+    if(!userLoc) return null;                                    // bez polohy nic
+    return haversine(userLoc.lat, userLoc.lon, site.lat, site.lon); // vzdálenost v m
+  }
+  // Naformátuje vzdálenost pro zobrazení (m do 950, jinak km s desetinnou čárkou)
+  function fmtDist(m){
+    if(m == null) return '';                                     // nic k zobrazení
+    return m < 950 ? Math.round(m)+' m' : (m/1000).toFixed(1).replace('.',',')+' km'; // „820 m" / „4,2 km"
   }
 
   // Vytvoří barevnou bodovou ikonu podle typu a spaní v autě
@@ -913,10 +954,12 @@
       const stars = site.stars ? `<span class="tag">${site.stars}★</span>` : ''; // štítek hvězdiček
       const car = carSleepAllowed(site) ? '<span class="tag auto">🚗 auto</span>' : ''; // štítek auta
       const web = site.website ? '<span class="tag">web</span>' : '';  // štítek webu
+      const d = distTo(site);                                    // vzdálenost od mé polohy (nebo null)
+      const dist = d != null ? `<span class="tag dist">${fmtDist(d)}</span>` : ''; // štítek vzdálenosti
       return `
         <div class="item" data-id="${site.id}">
           <div class="nm"><span class="dot ${dotClass}"></span>${esc(site.name)}</div>
-          <div class="meta">${esc(site.region)} ${stars} ${car} ${web}</div>
+          <div class="meta">${dist} ${esc(site.region)} ${stars} ${car} ${web}</div>
         </div>`;
     }).join('');                                                // spoj do jednoho řetězce
 
@@ -975,6 +1018,9 @@
 
     // Seřaď výsledky podle zvoleného klíče
     FILTERED.sort((a,b)=>{
+      if(sortBy==='dist' && userLoc){                          // řazení podle vzdálenosti od mé polohy
+        return distTo(a) - distTo(b);                          // nejbližší nahoře
+      }
       if(sortBy==='stars') return (b.stars||0)-(a.stars||0);   // podle hvězd sestupně
       if(sortBy==='region') return a.region.localeCompare(b.region,'cs') || a.name.localeCompare(b.name,'cs'); // podle oblasti
       return a.name.localeCompare(b.name,'cs');                // výchozí A–Z
@@ -1308,10 +1354,17 @@
   function wireUI(){
     // Vyhledávací pole: filtruj při psaní
     document.getElementById('search').addEventListener('input', applyFilters);
-    // Změna oblasti / hvězd / řazení: přefiltruj
+    // Změna oblasti / hvězd: přefiltruj
     document.getElementById('region').addEventListener('change', applyFilters);
     document.getElementById('stars').addEventListener('change', applyFilters);
-    document.getElementById('sort').addEventListener('change', applyFilters);
+    // Změna řazení: u „Nejbližší" bez polohy nejdřív zapni geolokaci
+    document.getElementById('sort').addEventListener('change', function(){
+      if(this.value==='dist' && !userLoc){                      // chci nejbližší, ale polohu neznám
+        startLocate();                                          // zapni sledování polohy
+        toast('Zapínám polohu pro řazení podle vzdálenosti…');  // informuj (seznam se seřadí po zaměření)
+      }
+      applyFilters();                                           // přefiltruj/seřaď (do fixu zatím dle názvu)
+    });
 
     // Přepínatelné pilulky (filtry)
     document.querySelectorAll('.pill').forEach(p=>{
@@ -1344,9 +1397,9 @@
      START APLIKACE
      ========================================================================= */
 
-  initMap();   // vytvoř mapu a vrstvy
-  wireUI();    // navěš ovládací prvky
-  loadData();  // načti data (z cache nebo z internetu)
+  initMap();     // vytvoř mapu a vrstvy
+  wireUI();      // navěš ovládací prvky
+  loadData();    // načti data (z cache nebo z internetu)
 
   </script>
 </body>
