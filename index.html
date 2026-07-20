@@ -674,6 +674,44 @@
   function saveUser(){ safeSet(USER_KEY, USER); }            // zapíše aktuální USER
 
   /* =========================================================================
+     CACHE DATASETŮ V INDEXEDDB (localStorage nestačí na tisíce míst)
+     ========================================================================= */
+
+  // Otevři/vytvoř databázi pro cache záložek
+  function idbOpen(){
+    return new Promise((res,rej)=>{
+      const r = indexedDB.open('hr_cache_db', 1);              // název DB
+      r.onupgradeneeded = ()=> r.result.createObjectStore('tabs'); // úložiště „tabs"
+      r.onsuccess = ()=> res(r.result);                        // hotovo
+      r.onerror = ()=> rej(r.error);                           // chyba
+    });
+  }
+  // Přečti cache záložky (IndexedDB); při chybě zkus localStorage
+  async function cacheGet(key){
+    try{
+      const db = await idbOpen();                              // otevři DB
+      return await new Promise((res,rej)=>{
+        const tx = db.transaction('tabs','readonly');          // čtecí transakce
+        const rq = tx.objectStore('tabs').get(key);            // načti podle klíče
+        rq.onsuccess = ()=> res(rq.result || null);            // hodnota (nebo null)
+        rq.onerror = ()=> rej(rq.error);                       // chyba
+      });
+    }catch(e){ return safeGet(key, null); }                    // pojistka: starý localStorage
+  }
+  // Ulož cache záložky (IndexedDB); při chybě zkus localStorage
+  async function cacheSet(key, val){
+    try{
+      const db = await idbOpen();                              // otevři DB
+      await new Promise((res,rej)=>{
+        const tx = db.transaction('tabs','readwrite');         // zapisovací transakce
+        tx.objectStore('tabs').put(val, key);                  // ulož objekt pod klíč
+        tx.oncomplete = ()=> res();                            // hotovo
+        tx.onerror = ()=> rej(tx.error);                       // chyba
+      });
+    }catch(e){ safeSet(key, val); }                            // pojistka (velká data se sem nemusí vejít)
+  }
+
+  /* =========================================================================
      KLASIFIKACE OBLASTI PODLE SOUŘADNIC (odhad – hrubé hranice)
      ========================================================================= */
 
@@ -727,7 +765,7 @@
   // START/aktivace záložky: použij cache; stáhni jen když cache není
   async function loadData(){
     const cfg = TABS[activeTab];                                // konfigurace aktivní záložky
-    const cache = safeGet(cfg.cacheKey, null);                 // uložená data
+    const cache = await cacheGet(cfg.cacheKey);                // uložená data (IndexedDB)
     if(cache && cache.data && cache.data.length){              // pokud data máme
       setTabData(activeTab, cache.data);                       // ulož do záložky
       tabFetchedAt[activeTab] = cache.fetchedAt;               // čas stažení
@@ -765,7 +803,7 @@
         ALL = getTabData(activeTab);                           // aktivuj dataset
         const now = Date.now();                                // čas
         tabFetchedAt[activeTab] = now;                         // zapamatuj čas
-        safeSet(cfg.cacheKey, {fetchedAt:now, data:parsed});   // ulož do cache
+        await cacheSet(cfg.cacheKey, {fetchedAt:now, data:parsed}); // ulož do cache (IndexedDB)
         afterLoad(now);                                        // vykresli
         endOverlay();                                          // schovej překryv
         if(isManual) toast('Data aktualizována ✔');            // potvrzení
@@ -778,7 +816,7 @@
       endOverlay();
       toast('Aktualizace se nezdařila — ponechávám stávající data');
     }else{
-      const cache = safeGet(cfg.cacheKey, null);               // pojistka: cache
+      const cache = await cacheGet(cfg.cacheKey);              // pojistka: cache
       if(cache && cache.data && cache.data.length){
         setTabData(activeTab, cache.data); ALL = getTabData(activeTab);
         afterLoad(cache.fetchedAt); endOverlay();
