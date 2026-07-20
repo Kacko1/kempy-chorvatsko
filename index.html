@@ -1069,10 +1069,12 @@
         </div>
       </div>
 
-      <!-- Přesné souřadnice pro navigaci -->
+      <!-- Přesné souřadnice pro navigaci — klikatelné = otevření přesného bodu na Google Maps -->
       <div class="drow">
-        <div class="k">Souřadnice (přesná poloha)</div>
-        <div class="v coords mono">${site.lat.toFixed(6)}, ${site.lon.toFixed(6)}</div>
+        <div class="k">Souřadnice <span style="text-transform:none;letter-spacing:0">(klepnutím zobrazíš na Google Maps)</span></div>
+        <div class="v coords mono">
+          <a href="${mapsUrl(site)}" target="_blank" rel="noopener" title="Zobrazit přesný bod na Google Maps" style="color:var(--sea);text-decoration:none">${site.lat.toFixed(6)}, ${site.lon.toFixed(6)} ↗</a>
+        </div>
       </div>
 
       <!-- Telefon, pokud je v OSM -->
