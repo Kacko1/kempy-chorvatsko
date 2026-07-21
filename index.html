@@ -8,7 +8,7 @@
   <!-- Responzivní chování na mobilech: šířka = šířka zařízení, výchozí zoom 1 -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!-- Titulek v záložce prohlížeče -->
-  <title>Kempy Chorvatsko — interaktivní mapa</title>
+  <title>Cestovní mapa — kempy a zajímavá místa</title>
 
   <!-- Styl mapové knihovny Leaflet (načítá se z CDN cdnjs) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -86,6 +86,14 @@
     .segbtn+.segbtn{border-left:1px solid var(--line)}          /* oddělovač */
     .segbtn:hover{color:var(--ink)}                             /* najetí */
     .segbtn.active{background:var(--sea);color:#04231f;font-weight:600} /* vybraný = akcent */
+
+    /* Výběr země v horní liště */
+    #countryWrap{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--muted)}
+    #country{
+      background:var(--bg);border:1px solid var(--line);color:var(--ink);
+      padding:7px 30px 7px 10px;border-radius:9px;font-size:12.5px;cursor:pointer;
+    }
+    #country:focus{outline:none;border-color:var(--sea)}
 
     /* Tělo pod horní lištou: sidebar vlevo, mapa vpravo */
     #body{display:flex;flex:1 1 auto;min-height:0;position:relative;overflow:hidden} /* relativní + ořez, aby schované panely nedělaly šířku navíc */
@@ -382,9 +390,18 @@
       <button id="sbtoggle" class="btn" title="Skrýt / zobrazit menu">☰</button>
       <!-- Název aplikace -->
       <div id="brand">
-        <b>Chorvatsko</b>
-        <span>živá data z OpenStreetMap</span>
+        <b>Cestovní mapa</b>
+        <span>kempy a místa z OpenStreetMap</span>
       </div>
+      <!-- Výběr země; poslední volba se ukládá do prohlížeče -->
+      <label id="countryWrap">Země
+        <select id="country">
+          <option value="cz">Česko</option>
+          <option value="at">Rakousko</option>
+          <option value="si">Slovinsko</option>
+          <option value="hr">Chorvatsko</option>
+        </select>
+      </label>
       <!-- Stavový text o datech (naplní JS) -->
       <div id="status">Načítám…</div>
       <!-- Přepínač zdroje dat: offline (uložený soubor) vs online (stahování) -->
@@ -393,7 +410,7 @@
         <button class="segbtn" data-src="live">🌐 Online</button>
       </div>
       <!-- Vygenerování datového souboru (pro offline režim) -->
-      <button id="exportBtn" class="btn" title="Stáhnout všechny záložky do souboru chorvatsko_data.json">⬇️ Data</button>
+      <button id="exportBtn" class="btn" title="Stáhnout všechny záložky vybrané země do JSON souboru">⬇️ Data</button>
       <!-- Tlačítko pro znovunačtení dat z internetu -->
       <button id="refresh" class="btn" title="Aktualizovat data aktivní záložky">↻ Aktualizovat</button>
     </div>
@@ -441,7 +458,7 @@
           <div class="frow">
             <!-- Výběr oblasti (naplní JS možnostmi) -->
             <select id="region" class="mini" title="Oblast (odhad podle polohy)">
-              <option value="">Celé Chorvatsko</option>
+              <option value="">Celá země</option>
             </select>
             <!-- Minimální počet hvězdiček (jen u kempů) -->
             <span id="starsWrap" style="display:inline-block">
@@ -526,10 +543,25 @@
      KONFIGURACE
      ========================================================================= */
 
-  // Klíče pro ukládání do localStorage (verzované, aby šlo v budoucnu měnit strukturu)
-  const CACHE_KEY = 'hr_camps_cache_v1';   // uložený stažený dataset kempů
-  const USER_KEY  = 'hr_camps_user_v1';    // moje editace (cena, poznámky, adresa, spaní v autě)
-  const SRC_MODE_KEY = 'hr_src_mode';      // zapamatovaný zdroj dat ('baked' / 'live')
+  // Země podporované aplikací. Název souboru je zároveň název JSONu pro offline režim.
+  const COUNTRIES = {
+    cz:{label:'Česko',      iso:'CZ', slug:'cesko',      search:'Česko',      center:[49.82,15.47], zoom:7, nameTag:'name:cs'},
+    at:{label:'Rakousko',   iso:'AT', slug:'rakousko',   search:'Österreich', center:[47.58,14.13], zoom:7, nameTag:'name:de'},
+    si:{label:'Slovinsko',  iso:'SI', slug:'slovinsko',  search:'Slovenija',  center:[46.15,14.99], zoom:8, nameTag:'name:sl'},
+    hr:{label:'Chorvatsko', iso:'HR', slug:'chorvatsko', search:'Hrvatska',   center:[44.30,15.60], zoom:7, nameTag:'name:hr'}
+  };
+  let activeCountry = 'cz';                 // výchozí země; uložená volba se načte při startu
+
+  // Klíče pro ukládání do localStorage (společné pro celou aplikaci)
+  const COUNTRY_KEY = 'travel_map_country_v1';
+  const SRC_MODE_KEY = 'travel_map_src_mode_v1'; // zapamatovaný zdroj dat ('baked' / 'live')
+  function countryCfg(){ return COUNTRIES[activeCountry]; }
+  function userKey(){ return 'travel_map_user_'+activeCountry+'_v1'; }
+  function cacheKey(tabId){
+    const version = (TABS[tabId] && TABS[tabId].cacheVersion) || 'v1';
+    return 'travel_map_'+activeCountry+'_'+tabId+'_'+version;
+  }
+  function bakedFilename(){ return countryCfg().slug+'_data.json'; }
 
   // Seznam Overpass endpointů (zrcadel) — zkouší se postupně, kdyby jeden nefungoval
   const OVERPASS = [
@@ -538,27 +570,15 @@
     'https://overpass.private.coffee/api/interpreter' // záložní zrcadlo 2
   ];
 
-  // Dotaz do Overpass API: všechny kempy a caravan/stellplatz sites v Chorvatsku (kód země HR)
-  const QUERY = `
-    [out:json][timeout:90];
-    area["ISO3166-1"="HR"]->.hr;
-    (
-      nwr["tourism"="camp_site"](area.hr);
-      nwr["tourism"="caravan_site"](area.hr);
-    );
-    out center tags;`;
-  // nwr = node/way/relation; out center = u ploch vrátí středový bod; tags = i s popisky
-
-  // Rychlý dotaz jen na POČET kempů (out count) — použije se pro cíl progres baru
-  const COUNT_QUERY = `
-    [out:json][timeout:60];
-    area["ISO3166-1"="HR"]->.hr;
-    (
-      nwr["tourism"="camp_site"](area.hr);
-      nwr["tourism"="caravan_site"](area.hr);
-    );
-    out count;`;
-  // out count = server nevrátí data, jen kolik prvků by dotaz našel
+  // Dotaz do Overpass API pro kempy aktuálně vybrané země.
+  function buildCampsQuery(count){
+    const iso = countryCfg().iso;
+    const tail = count ? 'out count;' : 'out center tags;';
+    return `[out:json][timeout:120];area["ISO3166-1"="${iso}"]->.country;(`
+      + 'nwr["tourism"="camp_site"](area.country);'
+      + 'nwr["tourism"="caravan_site"](area.country);'
+      + `);${tail}`;
+  }
 
   // Ověřené oficiální weby velkých resortů (klíč = normalizovaný název).
   // Slouží jako „obohacení" tam, kde OSM web nemá. Klidně si sem doplň další.
@@ -576,13 +596,13 @@
     if(sel.endsWith('#named')){ named = true; sel = sel.slice(0,-6); } // odstraň příznak
     const i = sel.indexOf('=');                                // oddělovač
     const k = sel.slice(0,i), v = sel.slice(i+1);              // klíč a hodnota
-    return `nwr["${k}"="${v}"]${named?'["name"]':''}(area.hr);`; // část dotazu (příp. jen s názvem)
+    return `nwr["${k}"="${v}"]${named?'["name"]':''}(area.country);`; // část dotazu (příp. jen s názvem)
   }
   // Sestaví Overpass dotaz (data nebo počet) z kategorií záložky
   function buildQuery(cats, count){
     const body = cats.map(c=>c.sel).flat().map(selToOverpass).join(''); // spoj selektory
     const tail = count ? 'out count;' : 'out center tags;';    // počet vs. data
-    return `[out:json][timeout:120];area["ISO3166-1"="HR"]->.hr;(${body});${tail}`;
+    return `[out:json][timeout:120];area["ISO3166-1"="${countryCfg().iso}"]->.country;(${body});${tail}`;
   }
   // Zařadí OSM prvek do první odpovídající kategorie záložky
   function classify(t, cats){
@@ -625,10 +645,10 @@
   let activeTab = 'camps';        // aktivní záložka
   const TABS = {
     // Kempy zůstávají speciální (mají vlastní logiku „spaní v autě")
-    camps:  { label:'⛺ Kempy', accent:'#2dd4bf', noun:'kempů', cacheKey:CACHE_KEY, query:QUERY, countQuery:COUNT_QUERY },
+    camps:  { label:'⛺ Kempy', accent:'#2dd4bf', noun:'kempů', cacheVersion:'v1', query:buildCampsQuery(false), countQuery:buildCampsQuery(true) },
 
     // Turistická místa
-    sights: { label:'🏛️ Turistická místa', accent:'#f59e0b', noun:'míst', cacheKey:'hr_sights_v2',
+    sights: { label:'🏛️ Turistická místa', accent:'#f59e0b', noun:'míst', cacheVersion:'v2',
       special:['notable','film'], notableDefault:true,
       cats:[
         {key:'historic', label:'🏰 Pamětihodnosti', color:'#f59e0b', sel:['historic=castle','historic=fort','historic=fortress','historic=ruins','historic=city_gate','historic=tower','historic=archaeological_site','historic=monument','historic=memorial'], match:t=>['castle','fort','fortress','ruins','city_gate','tower','archaeological_site','monument','memorial'].includes(t.historic)},
@@ -640,7 +660,7 @@
       ]},
 
     // Příroda
-    nature: { label:'🌲 Příroda', accent:'#34d399', noun:'míst', cacheKey:'hr_nature_v5',
+    nature: { label:'🌲 Příroda', accent:'#34d399', noun:'míst', cacheVersion:'v5',
       cats:[
         {key:'park', label:'🌲 Národní a přírodní parky', color:'#22c55e', sel:['boundary=national_park','leisure=nature_reserve'], match:t=>t.boundary==='national_park'||t.leisure==='nature_reserve'},
         {key:'view', label:'🌅 Vyhlídky a západy slunce', color:'#f59e0b', sel:['tourism=viewpoint'], match:t=>t.tourism==='viewpoint'},
@@ -651,7 +671,7 @@
       ]},
 
     // Jídlo a parkování
-    food: { label:'🍽️ Jídlo a parkování', accent:'#fb923c', noun:'míst', cacheKey:'hr_food_v1',
+    food: { label:'🍽️ Jídlo a parkování', accent:'#fb923c', noun:'míst', cacheVersion:'v1',
       cats:[
         {key:'restaurant', label:'🍽️ Restaurace a konoby', color:'#fb923c', sel:['amenity=restaurant'], match:t=>t.amenity==='restaurant'},
         {key:'cafe', label:'☕ Kavárny a rychlé', color:'#f59e0b', sel:['amenity=cafe','amenity=fast_food'], match:t=>['cafe','fast_food'].includes(t.amenity)},
@@ -659,7 +679,7 @@
       ]},
 
     // Praktické zázemí na cestách
-    services: { label:'🛠️ Zázemí', accent:'#38bdf8', noun:'míst', cacheKey:'hr_services_v2',
+    services: { label:'🛠️ Zázemí', accent:'#38bdf8', noun:'míst', cacheVersion:'v2',
       cats:[
         {key:'shell', label:'🐚 Shell', color:'#f6c945', sel:[], match:t=>t.amenity==='fuel' && (/^shell$/i.test(t.brand||'') || /shell/i.test(t.name||''))},
         {key:'fuel', label:'⛽ Čerpací stanice', color:'#f97316', sel:['amenity=fuel'], match:t=>t.amenity==='fuel'},
@@ -672,7 +692,7 @@
       ]},
 
     // Termály a lázně
-    spa: { label:'♨️ Termály a lázně', accent:'#f472b6', noun:'míst', cacheKey:'hr_spa_v1',
+    spa: { label:'♨️ Termály a lázně', accent:'#f472b6', noun:'míst', cacheVersion:'v1',
       cats:[
         {key:'spa', label:'♨️ Lázně a spa', color:'#f472b6', sel:['leisure=spa','amenity=spa'], match:t=>t.leisure==='spa'||t.amenity==='spa'},
         {key:'thermal', label:'🌡️ Termály', color:'#fb7185', sel:['natural=hot_spring'], match:t=>t.natural==='hot_spring'},
@@ -680,7 +700,7 @@
       ]},
 
     // Ubytování (kempy mají vlastní záložku, sem nepatří)
-    lodging: { label:'🛏️ Ubytování', accent:'#a78bfa', noun:'míst', cacheKey:'hr_lodging_v1',
+    lodging: { label:'🛏️ Ubytování', accent:'#a78bfa', noun:'míst', cacheVersion:'v1',
       cats:[
         {key:'hotel', label:'🏨 Hotely', color:'#a78bfa', sel:['tourism=hotel'], match:t=>t.tourism==='hotel'},
         {key:'apartment', label:'🏢 Apartmány', color:'#60a5fa', sel:['tourism=apartment'], match:t=>t.tourism==='apartment'},
@@ -705,6 +725,15 @@
       cfg.f = {};                                               // kempy: prázdný stav (mají vlastní flags)
     }
   }
+  // Po změně země znovu sestaví dotazy, ale zachová stav filtrů.
+  function refreshQueries(){
+    TABS.camps.query = buildCampsQuery(false);
+    TABS.camps.countQuery = buildCampsQuery(true);
+    for(const id in TABS){
+      const cfg = TABS[id];
+      if(cfg.cats){ cfg.query = buildQuery(cfg.cats, false); cfg.countQuery = buildQuery(cfg.cats, true); }
+    }
+  }
   // Zkratky pro aktivní záložku
   function activeCfg(){ return TABS[activeTab]; }                                     // aktivní konfigurace
   function isPoi(){ return activeTab !== 'camps'; }                                   // je to POI záložka?
@@ -724,7 +753,7 @@
   let activeId = null;          // ID právě otevřeného místa v detailu
   const tabFetchedAt = {};      // čas stažení dat pro každou záložku
   let bakedData = null;         // data načtená z přibaleného souboru (nebo null)
-  let sourceMode = 'live';      // 'baked' = z uloženého souboru, 'live' = stahování
+  let sourceMode = 'baked';     // výchozí je offline; 'live' = stahování z Overpassu
   let exportController = null;  // AbortController pro rušení exportu
   let exportCancelled = false;  // příznak zrušení exportu
 
@@ -746,9 +775,9 @@
     catch(e){ /* úložiště nedostupné — pokračuj bez ukládání */ }
   }
   // Načtení mých editací
-  function loadUser(){ return safeGet(USER_KEY, {}); }       // objekt {id: {...}} nebo prázdný
+  function loadUser(){ return safeGet(userKey(), {}); }      // objekt {id: {...}} nebo prázdný pro vybranou zemi
   // Uložení mých editací
-  function saveUser(){ safeSet(USER_KEY, USER); }            // zapíše aktuální USER
+  function saveUser(){ safeSet(userKey(), USER); }           // zapíše aktuální USER pro vybranou zemi
 
   /* =========================================================================
      „BYL JSEM TAM" A „OBLÍBENÉ" (uloženo v prohlížeči, na bod nezávisle na záložce)
@@ -790,7 +819,7 @@
   // Otevři/vytvoř databázi pro cache záložek
   function idbOpen(){
     return new Promise((res,rej)=>{
-      const r = indexedDB.open('hr_cache_db', 1);              // název DB
+      const r = indexedDB.open('travel_map_cache_db', 1);      // společná cache pro všechny země
       r.onupgradeneeded = ()=> r.result.createObjectStore('tabs'); // úložiště „tabs"
       r.onsuccess = ()=> res(r.result);                        // hotovo
       r.onerror = ()=> rej(r.error);                           // chyba
@@ -833,7 +862,13 @@
   // Smaže z IndexedDB staré verze cache, které už žádná záložka nepoužívá (jinak se hromadí a zaplní úložiště)
   async function cleanupOldCache(){
     try{
-      const valid = new Set(Object.values(TABS).map(t=>t.cacheKey)); // aktuálně platné klíče
+      const valid = new Set();                                  // platné klíče všech zemí a záložek
+      for(const countryId of Object.keys(COUNTRIES)){
+        for(const tabId of Object.keys(TABS)){
+          const version = TABS[tabId].cacheVersion || 'v1';
+          valid.add('travel_map_'+countryId+'_'+tabId+'_'+version);
+        }
+      }
       const db = await idbOpen();                              // otevři DB
       const keys = await new Promise((res,rej)=>{
         const tx = db.transaction('tabs','readonly');          // čtecí transakce
@@ -859,15 +894,20 @@
      KLASIFIKACE OBLASTI PODLE SOUŘADNIC (odhad – hrubé hranice)
      ========================================================================= */
 
-  // Vrátí přibližný název chorvatské oblasti podle zeměpisné polohy
+  // Vrátí přibližnou oblast podle zeměpisné polohy; přesnější OSM kraj má při parsování přednost.
   function regionOf(lat, lon){
-    if(lon < 14.35 && lat > 44.7 && lat < 45.55) return 'Istrie';                         // Istrijský poloostrov
-    if(lat >= 44.15 && lat <= 45.4 && lon >= 14.2 && lon < 15.05) return 'Kvarner';       // Kvarner + ostrovy (Krk, Cres, Lošinj, Rab)
-    if(lat > 45.3 && lon >= 15.0) return 'Kontinentální Chorvatsko';                       // vnitrozemí, Záhřeb, Slavonie
-    if(lat >= 44.3 && lon >= 15.0 && lon < 16.2) return 'Lika a Karlovac';                 // vnitrozemí, Plitvice
-    if(lat >= 43.55 && lat < 44.35) return 'Severní Dalmácie (Zadar, Šibenik)';            // Zadar/Šibenik
-    if(lat >= 43.05 && lat < 43.55) return 'Střední Dalmácie (Split, Makarska)';           // Split/Makarska
-    if(lat < 43.05) return 'Jižní Dalmácie (Dubrovník)';                                   // Dubrovník a okolí
+    if(activeCountry==='hr'){
+      if(lon < 14.35 && lat > 44.7 && lat < 45.55) return 'Istrie';
+      if(lat >= 44.15 && lat <= 45.4 && lon >= 14.2 && lon < 15.05) return 'Kvarner';
+      if(lat > 45.3 && lon >= 15.0) return 'Kontinentální Chorvatsko';
+      if(lat >= 44.3 && lon >= 15.0 && lon < 16.2) return 'Lika a Karlovac';
+      if(lat >= 43.55 && lat < 44.35) return 'Severní Dalmácie (Zadar, Šibenik)';
+      if(lat >= 43.05 && lat < 43.55) return 'Střední Dalmácie (Split, Makarska)';
+      if(lat < 43.05) return 'Jižní Dalmácie (Dubrovník)';
+    }
+    if(activeCountry==='cz') return lon < 15.3 ? 'Čechy' : (lon < 17.2 ? 'Morava' : 'Slezsko');
+    if(activeCountry==='at') return lon < 12.6 ? 'Západní Rakousko' : (lon < 15.2 ? 'Střední Rakousko' : 'Východní Rakousko');
+    if(activeCountry==='si') return lon < 14.4 ? 'Západní Slovinsko' : (lon < 15.3 ? 'Střední Slovinsko' : 'Východní Slovinsko');
     return 'Ostatní';                                                                       // co se nikam nevejde
   }
 
@@ -909,7 +949,7 @@
   // START/aktivace záložky: použij cache; stáhni jen když cache není
   async function loadData(){
     const cfg = TABS[activeTab];                                // konfigurace aktivní záložky
-    const cache = await cacheGet(cfg.cacheKey);                // uložená data (IndexedDB)
+    const cache = await cacheGet(cacheKey(activeTab));         // uložená data pro zemi a záložku
     if(cache && cache.data && cache.data.length){              // pokud data máme
       setTabData(activeTab, cache.data);                       // ulož do záložky
       tabFetchedAt[activeTab] = cache.fetchedAt;               // čas stažení
@@ -923,6 +963,8 @@
   // STAŽENÍ ČERSTVÝCH DAT AKTIVNÍ ZÁLOŽKY (první spuštění i ruční ↻)
   async function downloadFresh(isManual){
     const cfg = TABS[activeTab];                               // konfigurace záložky
+    const countrySelect = document.getElementById('country');
+    countrySelect.disabled = true;                             // zabrání změně země během běžícího dotazu
     const noun = cfg.noun;                                     // „kempů" / „míst"
     showOverlay(true,
       isManual ? 'Aktualizuji data…' : ('První načtení — stahuji '+noun+'…'), // text
@@ -944,9 +986,10 @@
         ALL = getTabData(activeTab);                           // aktivuj dataset
         const now = Date.now();                                // čas
         tabFetchedAt[activeTab] = now;                         // zapamatuj čas
-        await cacheSet(cfg.cacheKey, {fetchedAt:now, data:parsed}); // ulož do cache (IndexedDB)
+        await cacheSet(cacheKey(activeTab), {fetchedAt:now, data:parsed}); // ulož do cache země
         afterLoad(now);                                        // vykresli
         endOverlay();                                          // schovej překryv
+        countrySelect.disabled = false;
         if(isManual) toast('Data aktualizována ✔');            // potvrzení
         return;                                                // úspěch
       }catch(e){ lastErr = e; /* zkus další server */ }
@@ -955,14 +998,17 @@
     // Všechny servery selhaly
     if(ALL && ALL.length){                                     // máme aspoň stará data
       endOverlay();
+      countrySelect.disabled = false;
       toast('Aktualizace se nezdařila — ponechávám stávající data');
     }else{
-      const cache = await cacheGet(cfg.cacheKey);              // pojistka: cache
+      const cache = await cacheGet(cacheKey(activeTab));       // pojistka: cache vybrané země
       if(cache && cache.data && cache.data.length){
         setTabData(activeTab, cache.data); ALL = getTabData(activeTab);
         afterLoad(cache.fetchedAt); endOverlay();
+        countrySelect.disabled = false;
         toast('Offline — použita poslední uložená data');
       }else{
+        countrySelect.disabled = false;
         showError(lastErr);                                    // úplně bez dat → chyba
       }
     }
@@ -1041,14 +1087,15 @@
   }
 
   /* =========================================================================
-     ULOŽENÝ DATOVÝ SOUBOR (chorvatsko_data.json vedle index.html)
+     ULOŽENÝ DATOVÝ SOUBOR VYBRANÉ ZEMĚ (např. cesko_data.json vedle HTML)
      ========================================================================= */
 
   // Při startu zkus načíst přibalený datový soubor (jen ho připraví, nenaplní hned data)
   async function loadBaked(){
+    bakedData = null;
     try{
-      const r = await fetch('chorvatsko_data.json', {cache:'no-cache'}); // soubor vedle appky
-      if(!r.ok) return false;                                  // není → jedeme živě
+      const r = await fetch(bakedFilename(), {cache:'no-cache'}); // soubor vybrané země vedle appky
+      if(!r.ok) return false;                                  // soubor pro zemi není
       let obj = await r.json();                                // načti JSON
       if(obj && obj.compressed && typeof LZString !== 'undefined'){ // komprimovaný?
         obj = JSON.parse(LZString.decompressFromBase64(obj.z));// rozbal
@@ -1061,6 +1108,8 @@
 
   // Naplní data všech záložek z přibaleného souboru (volá se při vstupu do baked režimu)
   function applyBaked(){
+    for(const id in DATA) delete DATA[id];
+    for(const id in tabFetchedAt) delete tabFetchedAt[id];
     for(const id in bakedData){
       if(bakedData[id] && bakedData[id].data){ DATA[id] = bakedData[id].data; tabFetchedAt[id] = bakedData[id].fetchedAt; }
     }
@@ -1099,6 +1148,8 @@
   function sleep(ms){ return new Promise(r=> setTimeout(r, ms)); }
 
   async function exportData(){
+    const countrySelect = document.getElementById('country');
+    countrySelect.disabled = true;                              // během exportu neměň zemi
     exportController = new AbortController();                  // ovladač přerušení
     exportCancelled = false;                                  // reset
     showOverlay(true, 'Připravuji datový soubor…', 'Stahuji všechny záložky — nech appku otevřenou. Kvůli limitům serveru to chvíli trvá.');
@@ -1132,10 +1183,11 @@
       if(i < ids.length-1) await sleep(3000);                // pauza mezi záložkami (šetrné k serveru)
     }
     removeCancelBtn();                                        // ukliď tlačítko
-    if(exportCancelled){ endOverlay(); toast('Stahování zrušeno'); return; } // konec bez souboru
+    if(exportCancelled){ countrySelect.disabled=false; endOverlay(); toast('Stahování zrušeno'); return; } // konec bez souboru
     endOverlay();                                             // schovej překryv
 
     if(Object.keys(bundle).length === 0){                    // nic se nestáhlo
+      countrySelect.disabled=false;
       toast('Nestáhlo se nic — zkontroluj připojení a zkus to znovu za chvíli'); return;
     }
     // Zkomprimuj a nabídni ke stažení
@@ -1144,7 +1196,7 @@
       : JSON.stringify(bundle);
     const blob = new Blob([payload], {type:'application/json'}); // soubor
     const a = document.createElement('a');                     // odkaz ke stažení
-    a.href = URL.createObjectURL(blob); a.download = 'chorvatsko_data.json'; a.click(); // stáhni
+    a.href = URL.createObjectURL(blob); a.download = bakedFilename(); a.click(); // stáhni JSON vybrané země
     setTimeout(()=> URL.revokeObjectURL(a.href), 4000);        // ukliď
     // Zpráva o výsledku
     if(failed.length){
@@ -1152,25 +1204,31 @@
         + failed.map(id=>TABS[id].label).join('\n• ')
         + '\n\nDej ⬇️ Data znovu za pár minut, ať se doplní. Chybějící záložky by v offline byly prázdné.');
     }else{
-      toast('Hotovo — všech '+Object.keys(bundle).length+' záložek. Nahraj soubor na GitHub vedle index.html');
+      toast('Hotovo — '+bakedFilename()+'. Nahraj soubor na GitHub vedle HTML');
     }
+    countrySelect.disabled = false;
   }
 
   // Nastaví zdroj dat: 'baked' (offline soubor) nebo 'live' (stahování). Zapamatuje volbu.
-  function setSource(mode){
+  async function setSource(mode){
     if(mode === sourceMode) return;                           // beze změny
+    sourceMode = mode;
+    safeSet(SRC_MODE_KEY, sourceMode);                        // zapamatuj volbu
+    updateSourceUI();                                         // aktualizuj přepínač
     if(mode === 'baked'){                                     // přepínám na offline
-      if(!bakedData){ toast('Datový soubor není nahraný (vlož chorvatsko_data.json)'); return; }
-      sourceMode = 'baked';                                   // přepni
-      applyBaked();                                           // naplň data ze souboru
-      ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]); // překresli
+      const hasBaked = bakedData || await loadBaked();
+      if(hasBaked){
+        applyBaked();                                         // naplň data ze souboru
+        ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]); // překresli
+      }else{
+        for(const id in DATA) delete DATA[id]; ALL=[];
+        afterLoad(null);
+        toast('Chybí '+bakedFilename()+' — vytvoř ho tlačítkem Data');
+      }
     }else{                                                    // přepínám na online
-      sourceMode = 'live';                                    // přepni
       for(const id in DATA) delete DATA[id];                  // zahoď data z paměti
       loadData();                                             // načti aktivní záložku živě
     }
-    safeSet(SRC_MODE_KEY, sourceMode);                        // zapamatuj volbu
-    updateSourceUI();                                         // aktualizuj přepínač
   }
 
   // Vzhled segmentového přepínače a viditelnost tlačítka aktualizace
@@ -1178,6 +1236,45 @@
     document.querySelectorAll('.segbtn').forEach(b=>          // zvýrazni vybraný segment
       b.classList.toggle('active', b.getAttribute('data-src')===sourceMode));
     document.getElementById('refresh').style.display = (sourceMode==='baked') ? 'none' : ''; // ↻ jen online
+  }
+
+  // Aktualizuje popisky a polohu mapy podle vybrané země.
+  function updateCountryUI(moveMap){
+    const cfg = countryCfg();
+    document.getElementById('country').value = activeCountry;
+    document.getElementById('region').options[0].textContent = 'Celá země — '+cfg.label;
+    document.getElementById('exportBtn').title = 'Stáhnout '+bakedFilename();
+    if(moveMap && map) map.setView(cfg.center, cfg.zoom);
+  }
+
+  // Přepne zemi, oddělí její cache i uživatelská data a zachová zvolený offline/online režim.
+  async function switchCountry(code, initial){
+    if(!COUNTRIES[code]) code = 'cz';
+    if(!initial && code===activeCountry) return;
+    activeCountry = code;
+    safeSet(COUNTRY_KEY, activeCountry);
+    refreshQueries();
+    for(const id in DATA) delete DATA[id];
+    for(const id in tabFetchedAt) delete tabFetchedAt[id];
+    ALL = []; FILTERED = []; bakedData = null; activeId = null;
+    USER = loadUser();
+    closeDetail();
+    document.getElementById('search').value = '';
+    document.getElementById('region').value = '';
+    updateCountryUI(true);
+    updateTabUI();
+
+    const hasBaked = await loadBaked();
+    if(sourceMode==='baked'){
+      if(hasBaked){
+        applyBaked(); ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]);
+      }else{
+        afterLoad(null);
+        toast('Pro '+countryCfg().label+' chybí '+bakedFilename()+' — vytvoř ho tlačítkem Data');
+      }
+    }else{
+      loadData();
+    }
   }
   // Převod syrové Overpass odpovědi na naše zjednodušené objekty
   function parseOverpass(json){
@@ -1193,7 +1290,7 @@
       out.push({                                                // přidej objekt kempu
         id: el.type + '/' + el.id,                              // unikátní ID (např. way/12345)
         lat: +lat, lon: +lon,                                  // číselné souřadnice
-        name: t.name || t['name:hr'] || t['name:en'] || t.operator || 'Kemp bez názvu', // název s fallbacky
+        name: t.name || t[countryCfg().nameTag] || t['name:en'] || t.operator || 'Kemp bez názvu', // název s fallbacky
         kind: t.tourism,                                        // camp_site nebo caravan_site
         stars: t.stars ? parseInt(t.stars,10) : null,           // počet hvězdiček (číslo) nebo null
         website: t.website || t['contact:website'] || null,     // oficiální web z OSM
@@ -1201,7 +1298,7 @@
         email: t.email || t['contact:email'] || null,           // e-mail z OSM
         addr: addr,                                             // adresa z OSM (nebo null)
         city: t['addr:city'] || null,                           // město pro vyhledávání
-        region: regionOf(+lat, +lon),                           // odhadnutá oblast
+        region: t['addr:state'] || t['is_in:state'] || t['addr:region'] || regionOf(+lat, +lon), // kraj z OSM nebo odhad
         tags: t                                                 // ponech všechny tagy pro detail
       });
     }
@@ -1228,7 +1325,7 @@
       if(lat == null || lon == null) continue;                  // bez souřadnic přeskoč
       const cat = classify(t, cats);                            // kategorie
       // Název: OSM název, jinak zástupný podle kategorie (u WC / vody apod. bývá prázdný)
-      const name = t.name || t['name:hr'] || t['name:en'] || (cfg.labelOf[cat]||'Místo');
+      const name = t.name || t[countryCfg().nameTag] || t['name:en'] || (cfg.labelOf[cat]||'Místo');
       out.push({
         id: el.type + '/' + el.id,                              // unikátní ID
         lat:+lat, lon:+lon,                                     // souřadnice
@@ -1242,11 +1339,11 @@
         image: (t.image && /^https:\/\//i.test(t.image)) ? t.image : null, // přímý https obrázek
         addr: composeAddr(t),                                   // adresa
         city: t['addr:city'] || null,                           // město
-        region: regionOf(+lat,+lon)                             // oblast
+        region: t['addr:state'] || t['is_in:state'] || t['addr:region'] || regionOf(+lat,+lon) // oblast
         // pozn.: celý balík OSM tagů zde ZÁMĚRNĚ neukládáme — kvůli velikosti cache
       });
     }
-    if(tab==='sights') mergeFilms(out);                         // filmové lokace jen u turistiky
+    if(tab==='sights' && activeCountry==='hr') mergeFilms(out); // curated filmové lokace jsou zatím jen pro Chorvatsko
     return out;                                                 // vrať hotové
   }
 
@@ -1294,8 +1391,9 @@
      ========================================================================= */
 
   function initMap(){
-    // Vytvoř mapu se středem zhruba uprostřed chorvatského pobřeží
-    map = L.map('map', {zoomControl:true}).setView([44.3, 15.6], 7); // střed a zoom
+    // Vytvoř mapu se středem aktuálně vybrané země (při prvním startu Česko)
+    const cc = countryCfg();
+    map = L.map('map', {zoomControl:true}).setView(cc.center, cc.zoom); // střed a zoom
 
     // Satelitní (fotografická) podkladová vrstva – Esri World Imagery (zdarma, bez klíče)
     const sat = L.tileLayer(
@@ -1654,17 +1752,17 @@
     if(u && u.url) return u.url;                                // ruční URL má přednost
     if(site.website) return site.website;                      // web z OSM
     const key = site.name.toLowerCase().trim();                // normalizovaný název
-    if(CURATED_SITES[key]) return CURATED_SITES[key];          // ověřený web z našeho seznamu
+    if(activeCountry==='hr' && CURATED_SITES[key]) return CURATED_SITES[key]; // kurátorovaný seznam je zatím chorvatský
     return null;                                               // nic nemáme
   }
   // Booking.com – vyhledávací odkaz (funguje vždy, i bez konkrétní stránky)
   function bookingUrl(site){
-    const q = encodeURIComponent(site.name+' '+(site.city||'')+' Hrvatska'); // dotaz do URL
+    const q = encodeURIComponent(site.name+' '+(site.city||'')+' '+countryCfg().search); // dotaz do URL
     return 'https://www.booking.com/searchresults.html?ss='+q; // odkaz na výsledky hledání
   }
   // Google – vyhledání oficiálního webu, když ho neznáme
   function googleUrl(site){
-    const q = encodeURIComponent(site.name+' '+(site.city||site.region||'')+' Hrvatska'); // obecný dotaz
+    const q = encodeURIComponent(site.name+' '+(site.city||site.region||'')+' '+countryCfg().search); // obecný dotaz
     return 'https://www.google.com/search?q='+q;               // odkaz na Google
   }
   // Google Maps – přesný bod pro navigaci
@@ -1677,8 +1775,8 @@
   }
   // Google Maps – vyhledání zadané ADRESY (textově, ne podle souřadnic)
   function addrMapsUrl(addr){
-    // Když adresa neobsahuje zemi, přidej „Hrvatska" pro přesnější výsledek
-    const q = /hrvatsk|croatia|chorvat/i.test(addr) ? addr : (addr + ', Hrvatska');
+    // Přidej vybranou zemi pro přesnější hledání adresy.
+    const q = addr + ', ' + countryCfg().search;
     return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q); // odkaz na hledání adresy
   }
 
@@ -2127,7 +2225,7 @@
   function fillRegions(){
     const set = new Set(ALL.map(s=>s.region));                 // unikátní oblasti
     const sel = document.getElementById('region');            // element selectu
-    // Nejdřív vyprázdni (kromě první volby „Celé Chorvatsko"), ať se při přepnutí záložky nezdvojují
+    // Nejdřív vyprázdni (kromě první volby „Celá země"), ať se při přepnutí záložky nezdvojují
     while(sel.options.length > 1) sel.remove(1);              // odeber všechny kromě první
     [...set].sort((a,b)=>a.localeCompare(b,'cs')).forEach(r=>{ // seřaď abecedně
       const o = document.createElement('option');             // vytvoř možnost
@@ -2192,7 +2290,7 @@
     const box = document.getElementById('poiChips');          // kontejner chipů
     let html = '';                                            // sestavované HTML
     if((cfg.special||[]).includes('notable')) html += `<span class="pill${cfg.f.notable?' on':''}" data-sf="notable">⭐ Významná místa</span>`;
-    if((cfg.special||[]).includes('film'))    html += `<span class="pill film${cfg.f.film?' on':''}" data-sf="film">🎬 Filmová místa</span>`;
+    if(activeCountry==='hr' && (cfg.special||[]).includes('film')) html += `<span class="pill film${cfg.f.film?' on':''}" data-sf="film">🎬 Filmová místa</span>`;
     cfg.cats.forEach(c=>{                                     // chip pro každou kategorii
       html += `<span class="pill${cfg.f[c.key]?' on':''}" data-sf="${c.key}">${esc(c.label)}</span>`;
     });
@@ -2214,7 +2312,7 @@
   // Vygeneruje legendu pro POI záložku z barev kategorií
   function buildPoiLegend(cfg){
     let html = '';                                            // sestavované HTML
-    if((cfg.special||[]).includes('film')) html += `<div class="lg"><span class="dot" style="background:#e11d48"></span> 🎬 Filmové místo</div>`;
+    if(activeCountry==='hr' && (cfg.special||[]).includes('film')) html += `<div class="lg"><span class="dot" style="background:#e11d48"></span> 🎬 Filmové místo</div>`;
     cfg.cats.forEach(c=>{                                     // řádek pro každou kategorii
       html += `<div class="lg"><span class="dot" style="background:${c.color}"></span> ${esc(c.label)}</div>`;
     });
@@ -2252,7 +2350,7 @@
     // Aktualizuj stavový text nahoře (počet + čas)
     const when = fetchedAt ? new Date(fetchedAt).toLocaleString('cs-CZ') : '—'; // formátovaný čas
     document.getElementById('status').textContent =
-      ALL.length + ' ' + TABS[activeTab].noun + ' • data z ' + when; // text stavu podle záložky
+      countryCfg().label + ' • ' + ALL.length + ' ' + TABS[activeTab].noun + ' • data z ' + when; // země, počet a čas
     showOverlay(false);                                       // pro jistotu schovej překryv
   }
 
@@ -2261,6 +2359,8 @@
      ========================================================================= */
 
   function wireUI(){
+    // Země: přepni dataset, offline soubor, cache i střed mapy.
+    document.getElementById('country').addEventListener('change', function(){ switchCountry(this.value, false); });
     // Vyhledávací pole: filtruj při psaní
     document.getElementById('search').addEventListener('input', applyFilters);
     // Změna oblasti / hvězd: přefiltruj
@@ -2320,19 +2420,13 @@
   requestPersist();   // požádej o trvalé úložiště (ať iOS data nemaže)
   cleanupOldCache();  // smaž staré nepoužívané verze cache (uvolní místo)
 
-  // Start: přibalený soubor + zapamatovaná volba. Výchozí = offline (uložená data), pokud soubor existuje.
+  // Start: zapamatovaná země a zdroj. Při první návštěvě je výchozí Česko + Offline.
   (async function boot(){
-    const hasBaked = await loadBaked();                        // je vedle appky datový soubor?
-    const saved = safeGet(SRC_MODE_KEY, null);                 // poslední zvolený režim
-    // Když máme soubor: výchozí baked; „live" jen když sis ho posledně zvolil. Bez souboru vždy live.
-    sourceMode = (hasBaked && saved !== 'live') ? 'baked' : 'live';
-    updateSourceUI();                                          // vzhled tlačítka zdroje
-    if(sourceMode === 'baked'){                                // offline režim
-      applyBaked();                                            // naplň data ze souboru
-      ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]); // vykresli bez stahování
-    }else{
-      loadData();                                              // živě (cache/stažení)
-    }
+    const savedCountry = safeGet(COUNTRY_KEY, 'cz');           // poslední země, jinak Česko
+    const savedMode = safeGet(SRC_MODE_KEY, 'baked');          // poslední režim, jinak Offline
+    sourceMode = savedMode==='live' ? 'live' : 'baked';
+    updateSourceUI();
+    await switchCountry(COUNTRIES[savedCountry] ? savedCountry : 'cz', true);
   })();
 
   </script>
