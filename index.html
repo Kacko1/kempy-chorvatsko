@@ -1095,34 +1095,49 @@
   function removeCancelBtn(){ const b=document.getElementById('cancelExportBtn'); if(b) b.remove(); }
 
   // Vygeneruje datový soubor: stáhne všechny záložky a nabídne ke stažení (lze zrušit)
+  // Malá pauza (respektuje zrušení jen mezi kroky)
+  function sleep(ms){ return new Promise(r=> setTimeout(r, ms)); }
+
   async function exportData(){
     exportController = new AbortController();                  // ovladač přerušení
     exportCancelled = false;                                  // reset
-    showOverlay(true, 'Připravuji datový soubor…', 'Stahuji všechny záložky — nech appku otevřenou.');
+    showOverlay(true, 'Připravuji datový soubor…', 'Stahuji všechny záložky — nech appku otevřenou. Kvůli limitům serveru to chvíli trvá.');
     document.getElementById('ovspin').style.display = 'none';   // schovej spinner
     document.getElementById('progWrap').classList.add('show');  // ukaž bar
     addCancelBtn();                                           // tlačítko zrušení
     const bundle = {};                                        // výsledný balík
+    const failed = [];                                        // záložky, co se nepodařily
     const ids = Object.keys(TABS);                            // všechny záložky
     for(let i=0;i<ids.length;i++){                            // postupně
       if(exportCancelled) break;                              // zrušeno mezi záložkami
       const id = ids[i];
-      setOverlayMsg('Stahuji: '+TABS[id].label+' ('+(i+1)+'/'+ids.length+')'); // info
-      startWait('Připravuji data na serveru…');               // odpočet čekání
-      try{
-        const data = await fetchTabData(id, exportController.signal); // stáhni záložku
-        bundle[id] = { fetchedAt:Date.now(), data };          // ulož do balíku
-        DATA[id] = data;                                      // rovnou i do paměti
-      }catch(e){
-        stopWait();
-        if(exportCancelled) break;                            // zrušeno během stahování
-        /* jinak tuhle záložku přeskoč */
+      let data = null;                                        // stažená data
+      // Až 3 pokusy s prodlužující se pauzou (kvůli rate-limitu Overpassu)
+      for(let attempt=1; attempt<=3 && !exportCancelled; attempt++){
+        setOverlayMsg('Stahuji: '+TABS[id].label+' ('+(i+1)+'/'+ids.length+')'
+          + (attempt>1 ? ' — pokus '+attempt+'/3' : ''));
+        startWait('Připravuji data na serveru…');            // odpočet čekání
+        try{
+          data = await fetchTabData(id, exportController.signal); // stáhni
+          stopWait(); break;                                 // úspěch → konec pokusů
+        }catch(e){
+          stopWait();
+          if(exportCancelled || (e && e.name==='AbortError')) break; // zrušeno
+          if(attempt<3) await sleep(5000*attempt);           // počkej a zkus znovu
+        }
       }
-      stopWait();                                             // zastav odpočet
+      if(exportCancelled) break;                              // zrušeno
+      if(data){ bundle[id] = { fetchedAt:Date.now(), data }; DATA[id] = data; } // ulož
+      else failed.push(id);                                  // nepovedlo se
+      if(i < ids.length-1) await sleep(3000);                // pauza mezi záložkami (šetrné k serveru)
     }
     removeCancelBtn();                                        // ukliď tlačítko
     if(exportCancelled){ endOverlay(); toast('Stahování zrušeno'); return; } // konec bez souboru
     endOverlay();                                             // schovej překryv
+
+    if(Object.keys(bundle).length === 0){                    // nic se nestáhlo
+      toast('Nestáhlo se nic — zkontroluj připojení a zkus to znovu za chvíli'); return;
+    }
     // Zkomprimuj a nabídni ke stažení
     const payload = (typeof LZString !== 'undefined')
       ? JSON.stringify({ compressed:true, z:LZString.compressToBase64(JSON.stringify(bundle)) })
@@ -1131,7 +1146,14 @@
     const a = document.createElement('a');                     // odkaz ke stažení
     a.href = URL.createObjectURL(blob); a.download = 'chorvatsko_data.json'; a.click(); // stáhni
     setTimeout(()=> URL.revokeObjectURL(a.href), 4000);        // ukliď
-    toast('Soubor stažen — nahraj ho na GitHub vedle index.html');
+    // Zpráva o výsledku
+    if(failed.length){
+      alert('Soubor stažen, ALE tyto záložky se nestáhly (server je nejspíš dočasně omezil):\n\n• '
+        + failed.map(id=>TABS[id].label).join('\n• ')
+        + '\n\nDej ⬇️ Data znovu za pár minut, ať se doplní. Chybějící záložky by v offline byly prázdné.');
+    }else{
+      toast('Hotovo — všech '+Object.keys(bundle).length+' záložek. Nahraj soubor na GitHub vedle index.html');
+    }
   }
 
   // Nastaví zdroj dat: 'baked' (offline soubor) nebo 'live' (stahování). Zapamatuje volbu.
