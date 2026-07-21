@@ -167,6 +167,23 @@
     }
     .tag.auto{background:rgba(245,184,65,.14);border-color:var(--sand);color:var(--sand)} /* štítek „auto" = zlatá */
     .tag.dist{background:rgba(45,212,191,.14);border-color:var(--sea);color:var(--sea);font-weight:600} /* štítek vzdálenosti = teal */
+    .tag.tv{background:rgba(34,197,94,.18);border-color:#22c55e;color:#4ade80}  /* indikátor „byl jsem" */
+    .tag.tf{background:rgba(250,204,21,.18);border-color:#facc15;color:#fde047} /* indikátor „oblíbené" */
+
+    /* Tlačítka „byl jsem tady" / „oblíbené" v detailu */
+    .markbtns{display:flex;gap:8px;margin-bottom:14px}          /* vedle sebe */
+    .mbtn{
+      flex:1;justify-content:center;display:inline-flex;align-items:center; /* roztažená, vycentrovaná */
+      background:var(--panel-2);border:1px solid var(--line);color:var(--ink); /* výchozí vzhled */
+      padding:9px 10px;border-radius:9px;font-size:12.5px;cursor:pointer;transition:.15s;
+    }
+    .mbtn:hover{border-color:var(--ink)}                        /* najetí */
+    .mbtn.on-v{background:#22c55e;border-color:#22c55e;color:#052e16;font-weight:600} /* aktivní „byl jsem" = zelená */
+    .mbtn.on-f{background:#facc15;border-color:#facc15;color:#3a2e05;font-weight:600} /* aktivní „oblíbené" = žlutá */
+
+    /* Aktivní filtry „byl jsem" / „oblíbené" v barvě prstenců */
+    .pill.on[data-filter="visited"],.pill.on[data-sf="visited"]{background:#22c55e;border-color:#22c55e;color:#052e16}
+    .pill.on[data-filter="fav"],.pill.on[data-sf="fav"]{background:#facc15;border-color:#facc15;color:#3a2e05}
 
     /* ===== Mapa ===== */
     #map{flex:1 1 auto;min-width:0;background:#08131a}       /* mapa zabírá zbytek šířky */
@@ -384,6 +401,8 @@
             <span class="pill" data-filter="camp">Kempy</span>
             <span class="pill van" data-filter="van">Stellplatz / caravan</span>
             <span class="pill" data-filter="web">Má web</span>
+            <span class="pill" data-filter="visited">✅ Byl jsem tam</span>
+            <span class="pill" data-filter="fav">★ Oblíbené</span>
           </div>
 
           <!-- Filtry POI záložek (generují se dynamicky podle aktivní záložky) -->
@@ -675,7 +694,7 @@
   const tabFetchedAt = {};      // čas stažení dat pro každou záložku
 
   // Přepínatelné filtry KEMPŮ (POI záložky mají stav ve své konfiguraci: cfg.f)
-  const flags = { car:false, camp:false, van:false, web:false };
+  const flags = { car:false, camp:false, van:false, web:false, visited:false, fav:false };
 
   /* =========================================================================
      POMOCNÉ FUNKCE PRO ÚLOŽIŠTĚ (bezpečné vůči zákazu localStorage)
@@ -695,6 +714,39 @@
   function loadUser(){ return safeGet(USER_KEY, {}); }       // objekt {id: {...}} nebo prázdný
   // Uložení mých editací
   function saveUser(){ safeSet(USER_KEY, USER); }            // zapíše aktuální USER
+
+  /* =========================================================================
+     „BYL JSEM TAM" A „OBLÍBENÉ" (uloženo v prohlížeči, na bod nezávisle na záložce)
+     ========================================================================= */
+
+  function isVisited(site){ const u=USER[site.id]; return !!(u && u.visited); } // byl jsem tam?
+  function isFav(site){ const u=USER[site.id]; return !!(u && u.fav); }         // oblíbené?
+
+  // Přepne stav (visited/fav), uloží a překreslí mapu, seznam i detail
+  function toggleMark(id, kind){
+    const u = USER[id] || {};                                 // stávající editace
+    u[kind] = !u[kind];                                       // přepni příznak
+    USER[id] = u;                                             // zapiš zpět
+    saveUser();                                               // ulož do prohlížeče
+    applyFilters();                                           // překresli značky + seznam
+    openDetail(id);                                           // obnov stav tlačítek v detailu
+  }
+
+  // HTML dvojice tlačítek „Byl jsem tady" / „Oblíbené" do detailu
+  function markBtnsHtml(site){
+    const v = isVisited(site), f = isFav(site);               // aktuální stavy
+    return `<div class="markbtns">
+      <button class="mbtn${v?' on-v':''}" id="btnVisited">${v?'✔ Byl jsem tady':'✅ Byl jsem tady'}</button>
+      <button class="mbtn${f?' on-f':''}" id="btnFav">${f?'★ V oblíbených':'☆ Do oblíbených'}</button>
+    </div>`;
+  }
+  // Navěsí tlačítka označení (volá se po vykreslení detailu)
+  function wireMarkBtns(id){
+    const bv = document.getElementById('btnVisited');         // tlačítko „byl jsem"
+    const bf = document.getElementById('btnFav');             // tlačítko „oblíbené"
+    if(bv) bv.onclick = ()=> toggleMark(id,'visited');        // přepni návštěvu
+    if(bf) bf.onclick = ()=> toggleMark(id,'fav');            // přepni oblíbené
+  }
 
   /* =========================================================================
      CACHE DATASETŮ V INDEXEDDB (localStorage nestačí na tisíce míst)
@@ -1203,29 +1255,25 @@
     return m < 950 ? Math.round(m)+' m' : (m/1000).toFixed(1).replace('.',',')+' km'; // „820 m" / „4,2 km"
   }
 
-  // Vytvoří barevnou bodovou ikonu podle aktivní záložky
+  // Vytvoří barevnou bodovou ikonu podle aktivní záložky + prstence označení
   function iconFor(site){
-    if(isPoi()){                                                // POI záložky (turistika, příroda, jídlo…)
-      if(site.film){                                            // filmové místo = výrazná červená
-        return L.divIcon({
-          html:`<span class="mk" style="background:#e11d48;box-shadow:0 0 0 2px var(--bg),0 0 0 4px #fecdd3;"></span>`,
-          className:'mk-wrap', iconSize:[16,16], iconAnchor:[8,8]
-        });
-      }
-      const c = catColor(site.cat);                             // barva dle kategorie
-      return L.divIcon({
-        html:`<span class="mk" style="background:${c};box-shadow:0 0 0 2px var(--bg);"></span>`,
-        className:'mk-wrap', iconSize:[13,13], iconAnchor:[6.5,6.5]
-      });
+    let color, size;                                            // barva jádra a velikost
+    const rings = ['0 0 0 2px var(--bg)'];                      // vnitřní tmavý oddělovač
+    let r = 2;                                                  // aktuální vnější poloměr
+    if(isPoi()){                                                // POI záložky
+      color = site.film ? '#e11d48' : catColor(site.cat);       // barva jádra
+      size = site.film ? 16 : 13;                               // velikost
+      if(site.film){ rings.push('0 0 0 4px #fecdd3'); r = 4; }  // světlý filmový prstenec
+    }else{                                                      // kempy
+      color = site.kind === 'caravan_site' ? 'var(--van)' : 'var(--sea)'; // fialová vs. teal
+      size = 16;                                                // velikost
+      if(carSleepAllowed(site)){ rings.push('0 0 0 4px var(--sand)'); r = 4; } // zlatý = auto
     }
-    // Kempy (původní chování)
-    const color = site.kind === 'caravan_site' ? 'var(--van)' : 'var(--sea)'; // fialová vs. teal
-    const ring  = carSleepAllowed(site)                          // pokud lze spát v autě
-      ? 'box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--sand);'  // přidej zlatý prstenec
-      : 'box-shadow:0 0 0 2px var(--bg);';                       // jinak jen tmavý rámeček
+    if(isFav(site)){ rings.push('0 0 0 '+(r+2)+'px #facc15'); r += 2; }     // žlutý = oblíbené
+    if(isVisited(site)){ rings.push('0 0 0 '+(r+2)+'px #22c55e'); r += 2; } // zelený = navštíveno
     return L.divIcon({
-      html:`<span class="mk" style="background:${color};${ring}"></span>`,
-      className:'mk-wrap', iconSize:[16,16], iconAnchor:[8,8]
+      html:`<span class="mk" style="background:${color};box-shadow:${rings.join(',')};"></span>`, // jádro + prstence
+      className:'mk-wrap', iconSize:[size,size], iconAnchor:[size/2,size/2]  // velikost a kotva na střed
     });
   }
 
@@ -1292,6 +1340,7 @@
     el.innerHTML = list.map(site=>{
       const d = distTo(site);                                    // vzdálenost od mé polohy (nebo null)
       const dist = d != null ? `<span class="tag dist">${fmtDist(d)}</span>` : ''; // štítek vzdálenosti
+      const mk = (isVisited(site)?'<span class="tag tv">✔</span>':'')+(isFav(site)?'<span class="tag tf">★</span>':''); // označení
       if(sights){                                                // ---- POI (turistika, příroda…) ----
         const color = site.film ? '#e11d48' : catColor(site.cat); // barva tečky
         const catTag = `<span class="tag">${esc(catLabel(site.cat))}</span>`; // kategorie
@@ -1300,7 +1349,7 @@
         return `
           <div class="item" data-id="${esc(site.id)}">
             <div class="nm"><span class="dot" style="background:${color}"></span>${esc(site.name)}</div>
-            <div class="meta">${dist} ${esc(site.region)} ${catTag} ${film} ${web}</div>
+            <div class="meta">${mk} ${dist} ${esc(site.region)} ${catTag} ${film} ${web}</div>
           </div>`;
       }
       // ---- kemp (původní) ----
@@ -1311,7 +1360,7 @@
       return `
         <div class="item" data-id="${esc(site.id)}">
           <div class="nm"><span class="dot ${dotClass}"></span>${esc(site.name)}</div>
-          <div class="meta">${dist} ${esc(site.region)} ${stars} ${car} ${web}</div>
+          <div class="meta">${mk} ${dist} ${esc(site.region)} ${stars} ${car} ${web}</div>
         </div>`;
     }).join('');                                                // spoj do jednoho řetězce
 
@@ -1361,6 +1410,8 @@
         const activeCats = activeCfg().cats.filter(c=>f[c.key]); // zapnuté kategorie
         if(activeCats.length && !activeCats.some(c=>c.key===site.cat)) return false; // mimo výběr
         if(f.web && !(site.website||site.wikipedia||(USER[site.id]&&USER[site.id].url))) return false; // má info
+        if(f.visited && !isVisited(site)) return false;        // jen navštívená
+        if(f.fav && !isFav(site)) return false;                // jen oblíbená
         return true;                                           // prošlo
       }
 
@@ -1372,6 +1423,8 @@
         if(flags.van && !flags.camp && !isVan) return false;   // jen caravan
       }
       if(flags.web && !officialUrl(site)) return false;        // požaduji web
+      if(flags.visited && !isVisited(site)) return false;      // jen navštívené
+      if(flags.fav && !isFav(site)) return false;              // jen oblíbené
       if(minStars && (!site.stars || site.stars < minStars)) return false; // málo hvězd
       return true;                                             // prošlo
     });
@@ -1464,6 +1517,8 @@
       <!-- Fotka (doplní se z Wikimedia/Wikidata, pokud existuje) -->
       <div id="photoBox" class="photo"></div>
 
+      ${markBtnsHtml(site)}
+
       <!-- Základní zařazení -->
       <div class="drow">
         <div class="k">Typ • Oblast</div>
@@ -1546,6 +1601,7 @@
     // Navěš tlačítko uložení mých editací
     document.getElementById('saveBtn').onclick = ()=> saveDetail(id); // uloží a překreslí
 
+    wireMarkBtns(id);                                          // tlačítka „byl jsem" / „oblíbené"
     fillPhoto(site);                                           // zkus načíst fotku (z Wikimedia/Wikidata)
 
     // Otevři panel
@@ -1567,6 +1623,8 @@
     document.getElementById('dbody').innerHTML = `
       <!-- Fotka (doplní se z Wikimedia/Wikidata, pokud existuje) -->
       <div id="photoBox" class="photo"></div>
+
+      ${markBtnsHtml(site)}
 
       <!-- Kategorie a oblast -->
       <div class="drow">
@@ -1626,6 +1684,7 @@
     const geoBtn = document.getElementById('geoBtn');          // tlačítko dohledání adresy
     if(geoBtn) geoBtn.onclick = ()=> reverseGeocode(site);     // navěš
     document.getElementById('saveBtn').onclick = ()=> saveDetail(id); // uložení
+    wireMarkBtns(id);                                          // tlačítka „byl jsem" / „oblíbené"
     fillPhoto(site);                                           // zkus načíst fotku (z Wikimedia/Wikidata)
     document.getElementById('detail').classList.add('open');   // otevři panel
   }
@@ -1933,6 +1992,8 @@
       html += `<span class="pill${cfg.f[c.key]?' on':''}" data-sf="${c.key}">${esc(c.label)}</span>`;
     });
     html += `<span class="pill${cfg.f.web?' on':''}" data-sf="web">ℹ️ Má info</span>`; // filtr info
+    html += `<span class="pill${cfg.f.visited?' on':''}" data-sf="visited">✅ Byl jsem tam</span>`; // navštíveno
+    html += `<span class="pill${cfg.f.fav?' on':''}" data-sf="fav">★ Oblíbené</span>`;  // oblíbené
     box.innerHTML = html;                                     // vlož
     // Navěš přepínání
     box.querySelectorAll('.pill').forEach(p=>{
