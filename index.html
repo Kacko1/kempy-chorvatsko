@@ -77,6 +77,16 @@
     .btn:hover{border-color:var(--sea);color:#fff}     /* zvýraznění při najetí myší */
     .btn:disabled{opacity:.5;cursor:not-allowed}       /* zakázané tlačítko */
 
+    /* Segmentový přepínač Offline / Online */
+    .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--bg)} /* pouzdro */
+    .segbtn{
+      background:transparent;border:none;color:var(--muted);   /* neaktivní */
+      padding:7px 11px;font-size:12px;cursor:pointer;transition:.12s;white-space:nowrap;
+    }
+    .segbtn+.segbtn{border-left:1px solid var(--line)}          /* oddělovač */
+    .segbtn:hover{color:var(--ink)}                             /* najetí */
+    .segbtn.active{background:var(--sea);color:#04231f;font-weight:600} /* vybraný = akcent */
+
     /* Tělo pod horní lištou: sidebar vlevo, mapa vpravo */
     #body{display:flex;flex:1 1 auto;min-height:0;position:relative;overflow:hidden} /* relativní + ořez, aby schované panely nedělaly šířku navíc */
 
@@ -377,9 +387,12 @@
       </div>
       <!-- Stavový text o datech (naplní JS) -->
       <div id="status">Načítám…</div>
-      <!-- Přepínač zdroje dat: uložený soubor vs. živé stahování -->
-      <button id="srcToggle" class="btn" title="Přepnout zdroj dat">🌐 Živá data</button>
-      <!-- Vygenerování datového souboru (pro režim „uložená data") -->
+      <!-- Přepínač zdroje dat: offline (uložený soubor) vs online (stahování) -->
+      <div id="srcSwitch" class="seg">
+        <button class="segbtn" data-src="baked">📦 Offline</button>
+        <button class="segbtn" data-src="live">🌐 Online</button>
+      </div>
+      <!-- Vygenerování datového souboru (pro offline režim) -->
       <button id="exportBtn" class="btn" title="Stáhnout všechny záložky do souboru chorvatsko_data.json">⬇️ Data</button>
       <!-- Tlačítko pro znovunačtení dat z internetu -->
       <button id="refresh" class="btn" title="Aktualizovat data aktivní záložky">↻ Aktualizovat</button>
@@ -711,6 +724,8 @@
   const tabFetchedAt = {};      // čas stažení dat pro každou záložku
   let bakedData = null;         // data načtená z přibaleného souboru (nebo null)
   let sourceMode = 'live';      // 'baked' = z uloženého souboru, 'live' = stahování
+  let exportController = null;  // AbortController pro rušení exportu
+  let exportCancelled = false;  // příznak zrušení exportu
 
   // Přepínatelné filtry KEMPŮ (POI záložky mají stav ve své konfiguraci: cfg.f)
   const flags = { car:false, camp:false, van:false, web:false, visited:false, fav:false };
@@ -968,11 +983,12 @@
   }
 
   // Stažení hlavních dat se streamovaným čtením a průběžným hlášením postupu
-  async function fetchWithProgress(url, query, expectedBytes, expectedCount){
+  async function fetchWithProgress(url, query, expectedBytes, expectedCount, signal){
     const res = await fetch(url, {                             // odešli hlavní dotaz
       method:'POST',                                           // POST
       headers:{'Content-Type':'text/plain'},                   // text tělo
-      body: query                                             // hlavní dotaz aktivní záložky
+      body: query,                                            // hlavní dotaz aktivní záložky
+      signal: signal                                          // možnost přerušení (export)
     });
     if(!res.ok) throw new Error('HTTP '+res.status);           // chybový stav
     stopWait();                                                // server odpověděl → konec fáze čekání
@@ -1050,37 +1066,62 @@
   }
 
   // Stáhne a zpracuje data JEDNÉ záložky (pro export; bez zásahu do UI datasetu)
-  async function fetchTabData(tabId){
+  async function fetchTabData(tabId, signal){
     const cfg = TABS[tabId];                                   // konfigurace
     let lastErr = null;                                        // poslední chyba
     for(const url of OVERPASS){                                // zkoušej servery
       try{
-        const json = await fetchWithProgress(url, cfg.query, 0, 0); // stáhni
+        const json = await fetchWithProgress(url, cfg.query, 0, 0, signal); // stáhni
         return (tabId==='camps') ? parseOverpass(json) : parsePOI(json, tabId); // zpracuj
-      }catch(e){ lastErr = e; }
+      }catch(e){
+        if(e && e.name === 'AbortError') throw e;              // zrušeno → nepokoušej další server
+        lastErr = e;                                           // jinak zkus další server
+      }
     }
     throw lastErr || new Error('fetch failed');                // vše selhalo
   }
 
-  // Vygeneruje datový soubor: stáhne všechny záložky a nabídne ke stažení
+  // Přidá/odebere tlačítko „Zrušit stahování" do překryvu
+  function addCancelBtn(){
+    if(document.getElementById('cancelExportBtn')) return;     // už tam je
+    const ov = document.getElementById('overlay');            // překryv
+    const b = document.createElement('button');               // tlačítko
+    b.id = 'cancelExportBtn'; b.className = 'btn'; b.textContent = '✕ Zrušit stahování';
+    b.style.marginTop = '6px';                                // odsazení
+    b.onclick = ()=>{ exportCancelled = true; try{ exportController.abort(); }catch(e){} }; // zruš
+    ov.appendChild(b);                                        // přidej
+  }
+  function removeCancelBtn(){ const b=document.getElementById('cancelExportBtn'); if(b) b.remove(); }
+
+  // Vygeneruje datový soubor: stáhne všechny záložky a nabídne ke stažení (lze zrušit)
   async function exportData(){
+    exportController = new AbortController();                  // ovladač přerušení
+    exportCancelled = false;                                  // reset
     showOverlay(true, 'Připravuji datový soubor…', 'Stahuji všechny záložky — nech appku otevřenou.');
     document.getElementById('ovspin').style.display = 'none';   // schovej spinner
     document.getElementById('progWrap').classList.add('show');  // ukaž bar
-    const bundle = {};                                          // výsledný balík
-    const ids = Object.keys(TABS);                              // všechny záložky
-    for(let i=0;i<ids.length;i++){                              // postupně
+    addCancelBtn();                                           // tlačítko zrušení
+    const bundle = {};                                        // výsledný balík
+    const ids = Object.keys(TABS);                            // všechny záložky
+    for(let i=0;i<ids.length;i++){                            // postupně
+      if(exportCancelled) break;                              // zrušeno mezi záložkami
       const id = ids[i];
       setOverlayMsg('Stahuji: '+TABS[id].label+' ('+(i+1)+'/'+ids.length+')'); // info
-      startWait('Připravuji data na serveru…');                // odpočet čekání
+      startWait('Připravuji data na serveru…');               // odpočet čekání
       try{
-        const data = await fetchTabData(id);                   // stáhni záložku
-        bundle[id] = { fetchedAt:Date.now(), data };           // ulož do balíku
-        DATA[id] = data;                                       // rovnou i do paměti
-      }catch(e){ /* tuhle záložku přeskoč */ }
-      stopWait();                                              // zastav odpočet
+        const data = await fetchTabData(id, exportController.signal); // stáhni záložku
+        bundle[id] = { fetchedAt:Date.now(), data };          // ulož do balíku
+        DATA[id] = data;                                      // rovnou i do paměti
+      }catch(e){
+        stopWait();
+        if(exportCancelled) break;                            // zrušeno během stahování
+        /* jinak tuhle záložku přeskoč */
+      }
+      stopWait();                                             // zastav odpočet
     }
-    endOverlay();                                              // schovej překryv
+    removeCancelBtn();                                        // ukliď tlačítko
+    if(exportCancelled){ endOverlay(); toast('Stahování zrušeno'); return; } // konec bez souboru
+    endOverlay();                                             // schovej překryv
     // Zkomprimuj a nabídni ke stažení
     const payload = (typeof LZString !== 'undefined')
       ? JSON.stringify({ compressed:true, z:LZString.compressToBase64(JSON.stringify(bundle)) })
@@ -1092,29 +1133,28 @@
     toast('Soubor stažen — nahraj ho na GitHub vedle index.html');
   }
 
-  // Přepne zdroj dat: uložený soubor ↔ živé stahování (a zapamatuje volbu)
-  function toggleSource(){
-    if(sourceMode === 'live'){                                 // přepínám na uložená data
+  // Nastaví zdroj dat: 'baked' (offline soubor) nebo 'live' (stahování). Zapamatuje volbu.
+  function setSource(mode){
+    if(mode === sourceMode) return;                           // beze změny
+    if(mode === 'baked'){                                     // přepínám na offline
       if(!bakedData){ toast('Datový soubor není nahraný (vlož chorvatsko_data.json)'); return; }
-      sourceMode = 'baked';                                    // přepni
-      applyBaked();                                            // naplň data z balíku
+      sourceMode = 'baked';                                   // přepni
+      applyBaked();                                           // naplň data ze souboru
       ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]); // překresli
-    }else{                                                     // přepínám na živé stahování
-      sourceMode = 'live';                                     // přepni
-      for(const id in DATA) delete DATA[id];                   // zahoď data z paměti
-      loadData();                                              // načti aktivní záložku živě
+    }else{                                                    // přepínám na online
+      sourceMode = 'live';                                    // přepni
+      for(const id in DATA) delete DATA[id];                  // zahoď data z paměti
+      loadData();                                             // načti aktivní záložku živě
     }
-    safeSet(SRC_MODE_KEY, sourceMode);                         // zapamatuj poslední volbu
-    updateSourceUI();                                          // aktualizuj tlačítka
+    safeSet(SRC_MODE_KEY, sourceMode);                        // zapamatuj volbu
+    updateSourceUI();                                         // aktualizuj přepínač
   }
 
-  // Vzhled tlačítka zdroje a viditelnost exportu
+  // Vzhled segmentového přepínače a viditelnost tlačítka aktualizace
   function updateSourceUI(){
-    const b = document.getElementById('srcToggle');            // tlačítko zdroje
-    if(sourceMode === 'baked'){ b.textContent = '📦 Uložená data'; b.style.borderColor = 'var(--sea)'; }
-    else{ b.textContent = '🌐 Živá data'; b.style.borderColor = ''; }
-    // Ruční aktualizace dává smysl jen u živých dat
-    document.getElementById('refresh').style.display = (sourceMode==='baked') ? 'none' : '';
+    document.querySelectorAll('.segbtn').forEach(b=>          // zvýrazni vybraný segment
+      b.classList.toggle('active', b.getAttribute('data-src')===sourceMode));
+    document.getElementById('refresh').style.display = (sourceMode==='baked') ? 'none' : ''; // ↻ jen online
   }
   // Převod syrové Overpass odpovědi na naše zjednodušené objekty
   function parseOverpass(json){
@@ -2086,8 +2126,12 @@
     if(data && data.length){                                 // ano → jen aktivuj
       ALL = data;                                            // přepni dataset
       afterLoad(tabFetchedAt[tab]);                          // vykresli
+    }else if(sourceMode === 'baked'){                        // offline režim: NIKDY nestahuj
+      ALL = []; FILTERED = [];                               // prázdno
+      afterLoad(tabFetchedAt[tab]);                          // vykresli prázdný stav
+      toast('Tato záložka není v uloženém souboru — přepni na Online nebo vygeneruj soubor znovu');
     }else{
-      await loadData();                                      // jinak načti (cache/stažení)
+      await loadData();                                      // online: načti (cache/stažení)
     }
   }
 
@@ -2224,8 +2268,9 @@
 
     // Tlačítko aktualizace dat: ručně stáhni čerstvá data aktivní záložky
     document.getElementById('refresh').addEventListener('click', ()=> downloadFresh(true));
-    // Přepínač zdroje dat a export
-    document.getElementById('srcToggle').addEventListener('click', toggleSource);
+    // Přepínač zdroje dat (Offline / Online) a export
+    document.querySelectorAll('.segbtn').forEach(b=>
+      b.addEventListener('click', ()=> setSource(b.getAttribute('data-src'))));
     document.getElementById('exportBtn').addEventListener('click', exportData);
 
     // Zavření detailu (křížek)
