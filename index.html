@@ -807,6 +807,31 @@
     }catch(e){ try{ safeSet(key, val); }catch(_){} }           // pojistka (velká data se sem nemusí vejít)
   }
 
+  // Smaže z IndexedDB staré verze cache, které už žádná záložka nepoužívá (jinak se hromadí a zaplní úložiště)
+  async function cleanupOldCache(){
+    try{
+      const valid = new Set(Object.values(TABS).map(t=>t.cacheKey)); // aktuálně platné klíče
+      const db = await idbOpen();                              // otevři DB
+      const keys = await new Promise((res,rej)=>{
+        const tx = db.transaction('tabs','readonly');          // čtecí transakce
+        const rq = tx.objectStore('tabs').getAllKeys();        // všechny uložené klíče
+        rq.onsuccess = ()=> res(rq.result || []);              // pole klíčů
+        rq.onerror = ()=> rej(rq.error);                       // chyba
+      });
+      const stale = keys.filter(k=>!valid.has(k));             // klíče, které už nepatří žádné záložce
+      if(stale.length){                                        // pokud něco zbylo
+        const tx = db.transaction('tabs','readwrite');         // zapisovací transakce
+        const os = tx.objectStore('tabs');                     // úložiště
+        stale.forEach(k=> os.delete(k));                       // smaž staré verze
+      }
+    }catch(e){ /* úklid je jen best-effort */ }
+  }
+
+  // Požádá prohlížeč o trvalé úložiště (aby data tak snadno nemazal)
+  function requestPersist(){
+    try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+  }
+
   /* =========================================================================
      KLASIFIKACE OBLASTI PODLE SOUŘADNIC (odhad – hrubé hranice)
      ========================================================================= */
@@ -2118,10 +2143,12 @@
      START APLIKACE
      ========================================================================= */
 
-  initMap();     // vytvoř mapu a vrstvy
-  wireUI();      // navěš ovládací prvky
-  updateTabUI(); // nastav vzhled aktivní záložky (barva, filtry, legenda)
-  loadData();    // načti data (z cache nebo z internetu)
+  initMap();          // vytvoř mapu a vrstvy
+  wireUI();           // navěš ovládací prvky
+  updateTabUI();      // nastav vzhled aktivní záložky (barva, filtry, legenda)
+  requestPersist();   // požádej o trvalé úložiště (ať iOS data nemaže)
+  cleanupOldCache();  // smaž staré nepoužívané verze cache (uvolní místo)
+  loadData();         // načti data (z cache nebo z internetu)
 
   </script>
 </body>
