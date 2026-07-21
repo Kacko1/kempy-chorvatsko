@@ -1123,7 +1123,7 @@
         }catch(e){
           stopWait();
           if(exportCancelled || (e && e.name==='AbortError')) break; // zrušeno
-          if(attempt<3) await sleep(5000*attempt);           // počkej a zkus znovu
+          if(attempt<3) await sleep(20000*attempt);           // počkej a zkus znovu
         }
       }
       if(exportCancelled) break;                              // zrušeno
