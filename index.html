@@ -260,6 +260,12 @@
     /* Blok se souřadnicemi v monospace */
     .coords{font-size:12px;color:var(--sea)}
 
+    /* Fotka v detailu (z Wikimedia/Wikidata) */
+    .photo{margin-bottom:14px}                                  /* odsazení pod fotkou */
+    .photo img{width:100%;border-radius:10px;display:block;max-height:220px;object-fit:cover;background:var(--panel-2)} /* náhled */
+    .photo .photo-cap{display:block;font-size:10.5px;color:var(--muted);margin-top:4px;text-decoration:none} /* popisek/zdroj */
+    .photo .photo-cap:hover{color:var(--ink)}                  /* najetí */
+
     /* ===== Stavová hlášení (načítání / chyba) ===== */
     #overlay{
       position:absolute;inset:0;z-index:1600;display:none;      /* překryv přes celou aplikaci, skrytý */
@@ -1441,6 +1447,9 @@
 
     // Sestav HTML detailu
     document.getElementById('dbody').innerHTML = `
+      <!-- Fotka (doplní se z Wikimedia/Wikidata, pokud existuje) -->
+      <div id="photoBox" class="photo"></div>
+
       <!-- Základní zařazení -->
       <div class="drow">
         <div class="k">Typ • Oblast</div>
@@ -1523,6 +1532,8 @@
     // Navěš tlačítko uložení mých editací
     document.getElementById('saveBtn').onclick = ()=> saveDetail(id); // uloží a překreslí
 
+    fillPhoto(site);                                           // zkus načíst fotku (z Wikimedia/Wikidata)
+
     // Otevři panel
     document.getElementById('detail').classList.add('open');   // přidej třídu = zasunutí panelu
   }
@@ -1540,6 +1551,9 @@
       : '';
 
     document.getElementById('dbody').innerHTML = `
+      <!-- Fotka (doplní se z Wikimedia/Wikidata, pokud existuje) -->
+      <div id="photoBox" class="photo"></div>
+
       <!-- Kategorie a oblast -->
       <div class="drow">
         <div class="k">Kategorie • Oblast</div>
@@ -1598,6 +1612,7 @@
     const geoBtn = document.getElementById('geoBtn');          // tlačítko dohledání adresy
     if(geoBtn) geoBtn.onclick = ()=> reverseGeocode(site);     // navěš
     document.getElementById('saveBtn').onclick = ()=> saveDetail(id); // uložení
+    fillPhoto(site);                                           // zkus načíst fotku (z Wikimedia/Wikidata)
     document.getElementById('detail').classList.add('open');   // otevři panel
   }
 
@@ -1607,6 +1622,90 @@
     const lang = i>0 ? wp.slice(0,i) : 'en';                   // jazyk (nebo en)
     const title = i>0 ? wp.slice(i+1) : wp;                    // název článku
     return 'https://'+lang+'.wikipedia.org/wiki/'+encodeURIComponent(title.replace(/ /g,'_')); // URL
+  }
+
+  /* =========================================================================
+     FOTKY V DETAILU (z Wikimedia Commons / Wikidata / Wikipedie — zdarma)
+     ========================================================================= */
+
+  const photoCache = {};        // cache výsledků na relaci (i null = „zkusili jsme, nic")
+
+  // Náhled souboru z Wikimedia Commons v dané šířce (funguje jako <img src>, bez API)
+  function commonsThumb(filename, width){
+    return 'https://commons.wikimedia.org/wiki/Special:FilePath/'
+      + encodeURIComponent(filename.replace(/^File:/i,'').replace(/ /g,'_')) + '?width=' + width;
+  }
+  // Získá název obrázku (P18) z Wikidata záznamu
+  async function wikidataImage(qid){
+    const r = await fetch('https://www.wikidata.org/wiki/Special:EntityData/'+qid+'.json'); // JSON záznamu
+    const j = await r.json();                                   // rozparsuj
+    const ent = j.entities && j.entities[qid];                  // entita
+    const p18 = ent && ent.claims && ent.claims.P18 && ent.claims.P18[0]; // vlastnost „obrázek"
+    return p18 ? p18.mainsnak.datavalue.value : null;           // název souboru nebo null
+  }
+  // Získá náhledovou fotku z Wikipedie (REST summary)
+  async function wikipediaThumb(wp){
+    const i = wp.indexOf(':'); const lang = wp.slice(0,i); const title = wp.slice(i+1); // jazyk + název
+    const r = await fetch('https://'+lang+'.wikipedia.org/api/rest_v1/page/summary/'+encodeURIComponent(title.replace(/ /g,'_')));
+    const j = await r.json();                                   // rozparsuj
+    return (j.thumbnail && j.thumbnail.source) || null;         // URL náhledu nebo null
+  }
+  // Získá první obrázek z kategorie na Commons (když wikimedia_commons míří na Category:)
+  async function commonsFirstInCategory(cat){
+    const r = await fetch('https://commons.wikimedia.org/w/api.php?action=query&list=categorymembers&cmtitle='
+      + encodeURIComponent(cat) + '&cmtype=file&cmlimit=1&format=json&origin=*');
+    const j = await r.json();                                   // rozparsuj
+    const m = j.query && j.query.categorymembers && j.query.categorymembers[0]; // první soubor
+    return m ? m.title : null;                                  // „File:…" nebo null
+  }
+
+  // Vyřeší fotku pro daný objekt (zkouší zdroje v pořadí dle kvality vazby)
+  async function resolvePhoto(site){
+    if(photoCache[site.id] !== undefined) return photoCache[site.id]; // z cache
+    const t = site.tags || {};                                  // OSM tagy
+    let result = null;                                          // výsledek
+    try{
+      // 1) wikimedia_commons — konkrétní soubor nebo kategorie
+      if(t.wikimedia_commons){
+        const val = t.wikimedia_commons;
+        if(/^File:/i.test(val)){
+          result = { url:commonsThumb(val,600), caption:val.replace(/^File:/i,''), link:'https://commons.wikimedia.org/wiki/'+encodeURIComponent(val) };
+        }else if(/^Category:/i.test(val)){
+          const file = await commonsFirstInCategory(val);       // vytáhni první soubor z kategorie
+          if(file) result = { url:commonsThumb(file,600), caption:file.replace(/^File:/i,''), link:'https://commons.wikimedia.org/wiki/'+encodeURIComponent(val) };
+        }
+      }
+      // 2) wikidata → obrázek P18
+      if(!result && t.wikidata && /^Q\d+$/.test(t.wikidata)){
+        const file = await wikidataImage(t.wikidata);
+        if(file) result = { url:commonsThumb(file,600), caption:file, link:'https://www.wikidata.org/wiki/'+t.wikidata };
+      }
+      // 3) wikipedia → náhled článku
+      if(!result && t.wikipedia && t.wikipedia.includes(':')){
+        const thumb = await wikipediaThumb(t.wikipedia);
+        if(thumb) result = { url:thumb, caption:'Wikipedia', link:wikipediaUrl(t.wikipedia) };
+      }
+      // 4) přímý odkaz na obrázek (jen https kvůli zabezpečení stránky)
+      if(!result && t.image && /^https:\/\//i.test(t.image)){
+        result = { url:t.image, caption:'Foto', link:t.image };
+      }
+    }catch(e){ result = null; }                                 // při chybě nic
+    photoCache[site.id] = result;                               // ulož (i null)
+    return result;                                              // vrať
+  }
+
+  // Naplní box s fotkou v detailu (asynchronně; když fotka není, box skryje)
+  async function fillPhoto(site){
+    const box = document.getElementById('photoBox');           // kontejner fotky
+    if(!box) return;                                           // pojistka
+    box.style.display = 'none';                                // dokud nemáme fotku, nic neukazuj
+    const p = await resolvePhoto(site);                        // zkus získat fotku
+    if(!p || document.getElementById('photoBox') !== box) return; // nic / detail se mezitím změnil
+    if(activeId !== site.id) return;                           // uživatel už otevřel jiný objekt
+    // Vlož fotku + popisek se zdrojem; při chybě načtení se box skryje
+    box.innerHTML = '<img src="'+p.url+'" alt="" loading="lazy" onerror="this.parentElement.style.display=\'none\'">'
+      + '<a class="photo-cap" href="'+p.link+'" target="_blank" rel="noopener">'+esc(p.caption)+' · Wikimedia / Wikidata</a>';
+    box.style.display = 'block';                               // zobraz
   }
 
   // Uloží moje editace do USER a localStorage, pak překreslí
