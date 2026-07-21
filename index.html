@@ -349,6 +349,7 @@
     <!-- Lišta záložek (panelů) — vodorovně rolovatelná na úzku -->
     <div id="tabbar">
       <button class="tab active" data-tab="camps">⛺ Kempy</button>
+      <button class="tab" data-tab="lodging">🛏️ Ubytování</button>
       <button class="tab" data-tab="sights">🏛️ Turistická místa</button>
       <button class="tab" data-tab="nature">🌲 Příroda</button>
       <button class="tab" data-tab="food">🍽️ Jídlo a parkování</button>
@@ -598,8 +599,9 @@
       ]},
 
     // Praktické zázemí na cestách
-    services: { label:'🛠️ Zázemí', accent:'#38bdf8', noun:'míst', cacheKey:'hr_services_v1',
+    services: { label:'🛠️ Zázemí', accent:'#38bdf8', noun:'míst', cacheKey:'hr_services_v2',
       cats:[
+        {key:'shell', label:'🐚 Shell', color:'#f6c945', sel:[], match:t=>t.amenity==='fuel' && (/^shell$/i.test(t.brand||'') || /shell/i.test(t.name||''))},
         {key:'fuel', label:'⛽ Čerpací stanice', color:'#f97316', sel:['amenity=fuel'], match:t=>t.amenity==='fuel'},
         {key:'shop', label:'🛒 Supermarkety', color:'#22c55e', sel:['shop=supermarket','shop=convenience'], match:t=>['supermarket','convenience'].includes(t.shop)},
         {key:'pharmacy', label:'💊 Lékárny', color:'#ef4444', sel:['amenity=pharmacy'], match:t=>t.amenity==='pharmacy'},
@@ -615,6 +617,17 @@
         {key:'spa', label:'♨️ Lázně a spa', color:'#f472b6', sel:['leisure=spa','amenity=spa'], match:t=>t.leisure==='spa'||t.amenity==='spa'},
         {key:'thermal', label:'🌡️ Termály', color:'#fb7185', sel:['natural=hot_spring'], match:t=>t.natural==='hot_spring'},
         {key:'pool', label:'🏊 Aquaparky', color:'#38bdf8', sel:['leisure=water_park'], match:t=>t.leisure==='water_park'}
+      ]},
+
+    // Ubytování (kempy mají vlastní záložku, sem nepatří)
+    lodging: { label:'🛏️ Ubytování', accent:'#a78bfa', noun:'míst', cacheKey:'hr_lodging_v1',
+      cats:[
+        {key:'hotel', label:'🏨 Hotely', color:'#a78bfa', sel:['tourism=hotel'], match:t=>t.tourism==='hotel'},
+        {key:'apartment', label:'🏢 Apartmány', color:'#60a5fa', sel:['tourism=apartment'], match:t=>t.tourism==='apartment'},
+        {key:'guest', label:'🛏️ Penziony a pokoje', color:'#f472b6', sel:['tourism=guest_house'], match:t=>t.tourism==='guest_house'},
+        {key:'hostel', label:'🎒 Hostely', color:'#34d399', sel:['tourism=hostel'], match:t=>t.tourism==='hostel'},
+        {key:'motel', label:'🛣️ Motely', color:'#fb923c', sel:['tourism=motel'], match:t=>t.tourism==='motel'},
+        {key:'chalet', label:'🏡 Chaty a vily', color:'#f6c945', sel:['tourism=chalet'], match:t=>t.tourism==='chalet'}
       ]}
   };
 
@@ -1561,6 +1574,7 @@
             <span class="ic">🌐</span>${official ? 'Web' : 'Najít na Googlu'}
           </a>
           ${wiki ? `<a class="lnk" target="_blank" rel="noopener" href="${wiki}"><span class="ic">📖</span>Wikipedie</a>` : ''}
+          ${activeTab==='lodging' ? `<a class="lnk" target="_blank" rel="noopener" href="${bookingUrl(site)}"><span class="ic">🏨</span>Hledat na Booking.com</a>` : ''}
           <a class="lnk" target="_blank" rel="noopener" href="${mapsUrl(site)}">
             <span class="ic">📍</span>Otevřít v Google Maps
           </a>
