@@ -7,15 +7,16 @@ const OUTPUT_DIR = path.resolve('.');
 const TEMP_DIR = path.join(OUTPUT_DIR, '.map-data-tmp');
 
 const OVERPASS = [
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
   'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.private.coffee/api/interpreter'
+  'https://lambert.openstreetmap.de/api/interpreter',
+  'https://gall.openstreetmap.de/api/interpreter'
 ];
 
 const DELAY_MS = numberFromEnv('OVERPASS_DELAY_MS', 20_000);
-const RETRY_MS = numberFromEnv('OVERPASS_RETRY_MS', 20_000);
-const TIMEOUT_MS = numberFromEnv('OVERPASS_TIMEOUT_MS', 210_000);
-const MAX_ATTEMPTS = numberFromEnv('OVERPASS_MAX_ATTEMPTS', 3);
+const RETRY_MS = numberFromEnv('OVERPASS_RETRY_MS', 60_000);
+const TIMEOUT_MS = numberFromEnv('OVERPASS_TIMEOUT_MS', 300_000);
+const MAX_ATTEMPTS = numberFromEnv('OVERPASS_MAX_ATTEMPTS', 5);
 
 const COUNTRIES = [
   { id:'cz', iso:'CZ', label:'Česko', file:'cesko_data.json', nameTag:'name:cs' },
@@ -208,7 +209,7 @@ async function fetchTab(country, tabId){
       }
     }
     if(attempt < MAX_ATTEMPTS){
-      const pause = RETRY_MS * attempt;
+      const pause = RETRY_MS * attempt + Math.floor(Math.random() * 30_000);
       console.log('    další pokus za ' + Math.round(pause / 1000) + ' s');
       await sleep(pause);
     }
@@ -395,9 +396,33 @@ function runChecks(){
   console.log('Kontrola konfigurace a parseru: OK');
 }
 
+function argumentValue(name){
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : null;
+}
+
+async function probeCountry(countryId, requestedTab){
+  const country = COUNTRIES.find(item=>item.id === countryId);
+  if(!country) throw new Error('Neznámý kód země pro diagnostiku: ' + countryId);
+  if(requestedTab && !TABS[requestedTab]) throw new Error('Neznámá záložka pro diagnostiku: ' + requestedTab);
+  console.log('Diagnostika bez zápisu souborů: ' + country.label);
+  const tabIds = requestedTab ? [requestedTab] : Object.keys(TABS);
+  for(const tabId of tabIds){
+    const raw = await fetchTab(country, tabId);
+    const data = tabId === 'camps' ? parseCamps(raw, country) : parsePoi(raw, country, tabId);
+    console.log('  ' + TABS[tabId].label + ': ' + data.length + ' objektů');
+    await sleep(Math.min(DELAY_MS, 5_000));
+  }
+}
+
 async function main(){
   if(process.argv.includes('--check')){
     runChecks();
+    return;
+  }
+  const probeCountryId = argumentValue('--probe-country');
+  if(probeCountryId){
+    await probeCountry(probeCountryId, argumentValue('--probe-tab'));
     return;
   }
   await rm(TEMP_DIR, { recursive:true, force:true });
