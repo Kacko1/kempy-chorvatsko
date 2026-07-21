@@ -785,17 +785,14 @@
       'Data se pak uloží do prohlížeče. Příště se načtou hned a aktualizace spustíš tlačítkem ↻.');
     document.getElementById('ovspin').style.display = 'none';   // schovej spinner
     document.getElementById('progWrap').classList.add('show');  // ukaž progres bar
-    setProgress(null, 'připojuji se k serveru…');               // neurčitý stav
+    startWait('Připravuji data na serveru…');                   // počítadlo čekání (server počítá dotaz)
 
     let lastErr = null;                                         // poslední chyba
     for(const url of OVERPASS){                                 // zkoušej servery
       try{
-        let expectedCount = 0;                                  // cílový počet
-        try{ expectedCount = await fetchCount(url, cfg.countQuery); } // zjisti počet
-        catch(_){ /* bez počtu pokračuj */ }
-        if(expectedCount) setOverlayMsg('Nalezeno '+expectedCount+' '+noun+' — stahuji…'); // info
-        const expectedBytes = expectedCount ? expectedCount * BYTES_PER_CAMP : 0; // odhad velikosti
-        const json = await fetchWithProgress(url, cfg.query, expectedBytes, expectedCount); // stáhni
+        // Bez samostatného dotazu na počet — šetří jeden server-side výpočet.
+        // Místo cílového čísla ukazujeme živě rostoucí počet položek během stahování.
+        const json = await fetchWithProgress(url, cfg.query, 0, 0); // stáhni se streamem
 
         setProgress(1, 'zpracovávám data…');                   // 100 %
         const parsed = (activeTab==='camps') ? parseOverpass(json) : parsePOI(json, activeTab); // zpracuj podle záložky
@@ -850,6 +847,7 @@
       body: query                                             // hlavní dotaz aktivní záložky
     });
     if(!res.ok) throw new Error('HTTP '+res.status);           // chybový stav
+    stopWait();                                                // server odpověděl → konec fáze čekání
 
     // Kolik bajtů má odpověď dle serveru (nemusí být k dispozici u chunked přenosu)
     const lenHeader = res.headers.get('Content-Length');       // hlavička délky
@@ -1679,8 +1677,22 @@
     if(text != null) txt.textContent = text;                   // aktualizuj popisek
   }
 
+  // Počítadlo čekání během server-side výpočtu (než začnou téct data — nelze zjistit reálná %)
+  let waitTimer = null, waitStart = 0, waitMsg = '';
+  function startWait(msg){
+    waitMsg = msg; waitStart = Date.now();                     // zapamatuj text a čas startu
+    setProgress(null, msg+' (0 s)');                           // neurčitý stav + 0 s
+    clearInterval(waitTimer);                                  // pro jistotu zruš předchozí
+    waitTimer = setInterval(()=>{                              // každou vteřinu aktualizuj odpočet
+      const s = Math.round((Date.now()-waitStart)/1000);       // uplynulé vteřiny
+      setProgress(null, waitMsg+' ('+s+' s)');                 // ukaž „… (12 s)"
+    }, 1000);
+  }
+  function stopWait(){ clearInterval(waitTimer); waitTimer = null; } // zastav počítadlo
+
   // Ukončí překryv po úspěchu: schová ho a připraví bar na příště
   function endOverlay(){
+    stopWait();                                               // zastav počítadlo čekání
     showOverlay(false);                                        // schovej překryv
     document.getElementById('progWrap').classList.remove('show'); // schovej bar
     setProgress(0, '');                                        // resetuj bar na nulu
@@ -1688,6 +1700,7 @@
 
   // Zobrazí chybovou hlášku s možností zkusit znovu
   function showError(err){
+    stopWait();                                               // zastav počítadlo čekání
     showOverlay(true,
       'Data se teď nepodařilo stáhnout.',                      // hlavní hláška
       'Zkontroluj připojení k internetu a zkus to znovu. (Pokud běžíš v náhledu Claude, spusť soubor přímo v prohlížeči.)'); // rada
