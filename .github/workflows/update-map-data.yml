@@ -20,12 +20,12 @@ jobs:
 
     steps:
       - name: Načtení repozitáře
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Instalace komprese JSON
         run: npm install --no-save --ignore-scripts --no-audit --no-fund lz-string@1.5.0
@@ -37,9 +37,9 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=6144
           OVERPASS_DELAY_MS: "20000"
-          OVERPASS_RETRY_MS: "20000"
-          OVERPASS_TIMEOUT_MS: "210000"
-          OVERPASS_MAX_ATTEMPTS: "3"
+          OVERPASS_RETRY_MS: "60000"
+          OVERPASS_TIMEOUT_MS: "300000"
+          OVERPASS_MAX_ATTEMPTS: "5"
         run: node scripts/update-map-data.mjs
 
       - name: Uložení změněných JSON souborů
