@@ -199,6 +199,18 @@
     /* Vlastní vzhled bodové značky (barevný puntík) */
     .mk{display:block;width:14px;height:14px;border-radius:50%;border:2px solid var(--bg)} /* kroužek s tmavým rámem */
 
+    /* Obal značky + odznáčky označení (★ oblíbené, ✓ navštíveno) */
+    .mkwrap{position:relative;display:block}                    /* kontejner značky */
+    .mkwrap .mk{position:absolute;inset:0;width:100%;height:100%} /* puntík vyplní obal */
+    .mbadge{
+      position:absolute;width:13px;height:13px;border-radius:50%; /* malé kolečko */
+      background:#fff;display:flex;align-items:center;justify-content:center; /* bílé pozadí = kontrast na každé barvě */
+      font-size:9px;line-height:1;font-weight:700;                /* symbol */
+      box-shadow:0 0 2px rgba(0,0,0,.7);z-index:2;                /* odsazení od podkladu */
+    }
+    .mbadge.bfav{top:-6px;right:-6px;color:#a16207;border:1.5px solid #f59e0b} /* ★ oblíbené = žlutá */
+    .mbadge.bvis{bottom:-6px;right:-6px;color:#15803d;border:1.5px solid #22c55e} /* ✓ navštíveno = zelená */
+
     /* Tlačítko „Moje poloha" v mapě (řadí se pod ovládání zoomu) */
     .locate-ctl a{
       display:flex;align-items:center;justify-content:center; /* vycentruj ikonu */
@@ -1255,24 +1267,25 @@
     return m < 950 ? Math.round(m)+' m' : (m/1000).toFixed(1).replace('.',',')+' km'; // „820 m" / „4,2 km"
   }
 
-  // Vytvoří barevnou bodovou ikonu podle aktivní záložky + prstence označení
+  // Vytvoří barevnou bodovou ikonu podle aktivní záložky + odznáčky označení
   function iconFor(site){
     let color, size;                                            // barva jádra a velikost
     const rings = ['0 0 0 2px var(--bg)'];                      // vnitřní tmavý oddělovač
-    let r = 2;                                                  // aktuální vnější poloměr
     if(isPoi()){                                                // POI záložky
       color = site.film ? '#e11d48' : catColor(site.cat);       // barva jádra
       size = site.film ? 16 : 13;                               // velikost
-      if(site.film){ rings.push('0 0 0 4px #fecdd3'); r = 4; }  // světlý filmový prstenec
+      if(site.film) rings.push('0 0 0 4px #fecdd3');            // světlý filmový prstenec
     }else{                                                      // kempy
       color = site.kind === 'caravan_site' ? 'var(--van)' : 'var(--sea)'; // fialová vs. teal
       size = 16;                                                // velikost
-      if(carSleepAllowed(site)){ rings.push('0 0 0 4px var(--sand)'); r = 4; } // zlatý = auto
+      if(carSleepAllowed(site)) rings.push('0 0 0 4px var(--sand)'); // zlatý = auto
     }
-    if(isFav(site)){ rings.push('0 0 0 '+(r+2)+'px #facc15'); r += 2; }     // žlutý = oblíbené
-    if(isVisited(site)){ rings.push('0 0 0 '+(r+2)+'px #22c55e'); r += 2; } // zelený = navštíveno
+    // Odznáčky: ★ oblíbené (žlutý) vpravo nahoře, ✓ navštíveno (zelený) vpravo dole
+    const badges =
+      (isFav(site) ? '<span class="mbadge bfav">★</span>' : '') +
+      (isVisited(site) ? '<span class="mbadge bvis">✓</span>' : '');
     return L.divIcon({
-      html:`<span class="mk" style="background:${color};box-shadow:${rings.join(',')};"></span>`, // jádro + prstence
+      html:`<div class="mkwrap" style="width:${size}px;height:${size}px"><span class="mk" style="background:${color};box-shadow:${rings.join(',')}"></span>${badges}</div>`,
       className:'mk-wrap', iconSize:[size,size], iconAnchor:[size/2,size/2]  // velikost a kotva na střed
     });
   }
