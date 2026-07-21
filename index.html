@@ -377,6 +377,10 @@
       </div>
       <!-- Stavový text o datech (naplní JS) -->
       <div id="status">Načítám…</div>
+      <!-- Přepínač zdroje dat: uložený soubor vs. živé stahování -->
+      <button id="srcToggle" class="btn" title="Přepnout zdroj dat">🌐 Živá data</button>
+      <!-- Vygenerování datového souboru (pro režim „uložená data") -->
+      <button id="exportBtn" class="btn" title="Stáhnout všechny záložky do souboru chorvatsko_data.json">⬇️ Data</button>
       <!-- Tlačítko pro znovunačtení dat z internetu -->
       <button id="refresh" class="btn" title="Aktualizovat data aktivní záložky">↻ Aktualizovat</button>
     </div>
@@ -511,6 +515,7 @@
   // Klíče pro ukládání do localStorage (verzované, aby šlo v budoucnu měnit strukturu)
   const CACHE_KEY = 'hr_camps_cache_v1';   // uložený stažený dataset kempů
   const USER_KEY  = 'hr_camps_user_v1';    // moje editace (cena, poznámky, adresa, spaní v autě)
+  const SRC_MODE_KEY = 'hr_src_mode';      // zapamatovaný zdroj dat ('baked' / 'live')
 
   // Seznam Overpass endpointů (zrcadel) — zkouší se postupně, kdyby jeden nefungoval
   const OVERPASS = [
@@ -704,6 +709,8 @@
   const markerById = {};        // rychlý přístup ke značce podle ID
   let activeId = null;          // ID právě otevřeného místa v detailu
   const tabFetchedAt = {};      // čas stažení dat pro každou záložku
+  let bakedData = null;         // data načtená z přibaleného souboru (nebo null)
+  let sourceMode = 'live';      // 'baked' = z uloženého souboru, 'live' = stahování
 
   // Přepínatelné filtry KEMPŮ (POI záložky mají stav ve své konfiguraci: cfg.f)
   const flags = { car:false, camp:false, van:false, web:false, visited:false, fav:false };
@@ -1016,6 +1023,99 @@
     return JSON.parse(text);                                   // rozparsuj výsledný JSON
   }
 
+  /* =========================================================================
+     ULOŽENÝ DATOVÝ SOUBOR (chorvatsko_data.json vedle index.html)
+     ========================================================================= */
+
+  // Při startu zkus načíst přibalený datový soubor (jen ho připraví, nenaplní hned data)
+  async function loadBaked(){
+    try{
+      const r = await fetch('chorvatsko_data.json', {cache:'no-cache'}); // soubor vedle appky
+      if(!r.ok) return false;                                  // není → jedeme živě
+      let obj = await r.json();                                // načti JSON
+      if(obj && obj.compressed && typeof LZString !== 'undefined'){ // komprimovaný?
+        obj = JSON.parse(LZString.decompressFromBase64(obj.z));// rozbal
+      }
+      if(!obj || typeof obj !== 'object') return false;        // nevalidní
+      bakedData = obj;                                         // zapamatuj (naplní se až v baked režimu)
+      return true;                                             // máme uložená data
+    }catch(e){ return false; }                                 // chyba → živě
+  }
+
+  // Naplní data všech záložek z přibaleného souboru (volá se při vstupu do baked režimu)
+  function applyBaked(){
+    for(const id in bakedData){
+      if(bakedData[id] && bakedData[id].data){ DATA[id] = bakedData[id].data; tabFetchedAt[id] = bakedData[id].fetchedAt; }
+    }
+  }
+
+  // Stáhne a zpracuje data JEDNÉ záložky (pro export; bez zásahu do UI datasetu)
+  async function fetchTabData(tabId){
+    const cfg = TABS[tabId];                                   // konfigurace
+    let lastErr = null;                                        // poslední chyba
+    for(const url of OVERPASS){                                // zkoušej servery
+      try{
+        const json = await fetchWithProgress(url, cfg.query, 0, 0); // stáhni
+        return (tabId==='camps') ? parseOverpass(json) : parsePOI(json, tabId); // zpracuj
+      }catch(e){ lastErr = e; }
+    }
+    throw lastErr || new Error('fetch failed');                // vše selhalo
+  }
+
+  // Vygeneruje datový soubor: stáhne všechny záložky a nabídne ke stažení
+  async function exportData(){
+    showOverlay(true, 'Připravuji datový soubor…', 'Stahuji všechny záložky — nech appku otevřenou.');
+    document.getElementById('ovspin').style.display = 'none';   // schovej spinner
+    document.getElementById('progWrap').classList.add('show');  // ukaž bar
+    const bundle = {};                                          // výsledný balík
+    const ids = Object.keys(TABS);                              // všechny záložky
+    for(let i=0;i<ids.length;i++){                              // postupně
+      const id = ids[i];
+      setOverlayMsg('Stahuji: '+TABS[id].label+' ('+(i+1)+'/'+ids.length+')'); // info
+      startWait('Připravuji data na serveru…');                // odpočet čekání
+      try{
+        const data = await fetchTabData(id);                   // stáhni záložku
+        bundle[id] = { fetchedAt:Date.now(), data };           // ulož do balíku
+        DATA[id] = data;                                       // rovnou i do paměti
+      }catch(e){ /* tuhle záložku přeskoč */ }
+      stopWait();                                              // zastav odpočet
+    }
+    endOverlay();                                              // schovej překryv
+    // Zkomprimuj a nabídni ke stažení
+    const payload = (typeof LZString !== 'undefined')
+      ? JSON.stringify({ compressed:true, z:LZString.compressToBase64(JSON.stringify(bundle)) })
+      : JSON.stringify(bundle);
+    const blob = new Blob([payload], {type:'application/json'}); // soubor
+    const a = document.createElement('a');                     // odkaz ke stažení
+    a.href = URL.createObjectURL(blob); a.download = 'chorvatsko_data.json'; a.click(); // stáhni
+    setTimeout(()=> URL.revokeObjectURL(a.href), 4000);        // ukliď
+    toast('Soubor stažen — nahraj ho na GitHub vedle index.html');
+  }
+
+  // Přepne zdroj dat: uložený soubor ↔ živé stahování (a zapamatuje volbu)
+  function toggleSource(){
+    if(sourceMode === 'live'){                                 // přepínám na uložená data
+      if(!bakedData){ toast('Datový soubor není nahraný (vlož chorvatsko_data.json)'); return; }
+      sourceMode = 'baked';                                    // přepni
+      applyBaked();                                            // naplň data z balíku
+      ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]); // překresli
+    }else{                                                     // přepínám na živé stahování
+      sourceMode = 'live';                                     // přepni
+      for(const id in DATA) delete DATA[id];                   // zahoď data z paměti
+      loadData();                                              // načti aktivní záložku živě
+    }
+    safeSet(SRC_MODE_KEY, sourceMode);                         // zapamatuj poslední volbu
+    updateSourceUI();                                          // aktualizuj tlačítka
+  }
+
+  // Vzhled tlačítka zdroje a viditelnost exportu
+  function updateSourceUI(){
+    const b = document.getElementById('srcToggle');            // tlačítko zdroje
+    if(sourceMode === 'baked'){ b.textContent = '📦 Uložená data'; b.style.borderColor = 'var(--sea)'; }
+    else{ b.textContent = '🌐 Živá data'; b.style.borderColor = ''; }
+    // Ruční aktualizace dává smysl jen u živých dat
+    document.getElementById('refresh').style.display = (sourceMode==='baked') ? 'none' : '';
+  }
   // Převod syrové Overpass odpovědi na naše zjednodušené objekty
   function parseOverpass(json){
     const out = [];                                             // výsledné pole
@@ -2124,6 +2224,9 @@
 
     // Tlačítko aktualizace dat: ručně stáhni čerstvá data aktivní záložky
     document.getElementById('refresh').addEventListener('click', ()=> downloadFresh(true));
+    // Přepínač zdroje dat a export
+    document.getElementById('srcToggle').addEventListener('click', toggleSource);
+    document.getElementById('exportBtn').addEventListener('click', exportData);
 
     // Zavření detailu (křížek)
     document.getElementById('dclose').addEventListener('click', closeDetail);
@@ -2148,7 +2251,21 @@
   updateTabUI();      // nastav vzhled aktivní záložky (barva, filtry, legenda)
   requestPersist();   // požádej o trvalé úložiště (ať iOS data nemaže)
   cleanupOldCache();  // smaž staré nepoužívané verze cache (uvolní místo)
-  loadData();         // načti data (z cache nebo z internetu)
+
+  // Start: přibalený soubor + zapamatovaná volba. Výchozí = offline (uložená data), pokud soubor existuje.
+  (async function boot(){
+    const hasBaked = await loadBaked();                        // je vedle appky datový soubor?
+    const saved = safeGet(SRC_MODE_KEY, null);                 // poslední zvolený režim
+    // Když máme soubor: výchozí baked; „live" jen když sis ho posledně zvolil. Bez souboru vždy live.
+    sourceMode = (hasBaked && saved !== 'live') ? 'baked' : 'live';
+    updateSourceUI();                                          // vzhled tlačítka zdroje
+    if(sourceMode === 'baked'){                                // offline režim
+      applyBaked();                                            // naplň data ze souboru
+      ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]); // vykresli bez stahování
+    }else{
+      loadData();                                              // živě (cache/stažení)
+    }
+  })();
 
   </script>
 </body>
