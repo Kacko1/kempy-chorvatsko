@@ -973,11 +973,12 @@
         website: t.website || t['contact:website'] || null,     // web
         wikipedia: t.wikipedia || null,                         // Wikipedie
         wikidata: t.wikidata || null,                           // Wikidata
+        commons: t.wikimedia_commons || null,                   // obrázek/kategorie na Commons
+        image: (t.image && /^https:\/\//i.test(t.image)) ? t.image : null, // přímý https obrázek
         addr: composeAddr(t),                                   // adresa
         city: t['addr:city'] || null,                           // město
-        region: regionOf(+lat,+lon),                            // oblast
-        film:false, films:null,                                 // filmová místa
-        tags: t                                                 // ponech tagy
+        region: regionOf(+lat,+lon)                             // oblast
+        // pozn.: celý balík OSM tagů zde ZÁMĚRNĚ neukládáme — kvůli velikosti cache
       });
     }
     if(tab==='sights') mergeFilms(out);                         // filmové lokace jen u turistiky
@@ -1662,32 +1663,35 @@
   // Vyřeší fotku pro daný objekt (zkouší zdroje v pořadí dle kvality vazby)
   async function resolvePhoto(site){
     if(photoCache[site.id] !== undefined) return photoCache[site.id]; // z cache
-    const t = site.tags || {};                                  // OSM tagy
+    const t = site.tags || {};                                  // kempy mají celé tagy; POI mají jen pole
+    const commons = t.wikimedia_commons || site.commons;        // odkaz na Commons
+    const wd = t.wikidata || site.wikidata;                     // Wikidata ID
+    const wp = t.wikipedia || site.wikipedia;                   // Wikipedie
+    const img = t.image || site.image;                          // přímý obrázek
     let result = null;                                          // výsledek
     try{
       // 1) wikimedia_commons — konkrétní soubor nebo kategorie
-      if(t.wikimedia_commons){
-        const val = t.wikimedia_commons;
-        if(/^File:/i.test(val)){
-          result = { url:commonsThumb(val,600), caption:val.replace(/^File:/i,''), link:'https://commons.wikimedia.org/wiki/'+encodeURIComponent(val) };
-        }else if(/^Category:/i.test(val)){
-          const file = await commonsFirstInCategory(val);       // vytáhni první soubor z kategorie
-          if(file) result = { url:commonsThumb(file,600), caption:file.replace(/^File:/i,''), link:'https://commons.wikimedia.org/wiki/'+encodeURIComponent(val) };
+      if(commons){
+        if(/^File:/i.test(commons)){
+          result = { url:commonsThumb(commons,600), caption:commons.replace(/^File:/i,''), link:'https://commons.wikimedia.org/wiki/'+encodeURIComponent(commons) };
+        }else if(/^Category:/i.test(commons)){
+          const file = await commonsFirstInCategory(commons);   // vytáhni první soubor z kategorie
+          if(file) result = { url:commonsThumb(file,600), caption:file.replace(/^File:/i,''), link:'https://commons.wikimedia.org/wiki/'+encodeURIComponent(commons) };
         }
       }
       // 2) wikidata → obrázek P18
-      if(!result && t.wikidata && /^Q\d+$/.test(t.wikidata)){
-        const file = await wikidataImage(t.wikidata);
-        if(file) result = { url:commonsThumb(file,600), caption:file, link:'https://www.wikidata.org/wiki/'+t.wikidata };
+      if(!result && wd && /^Q\d+$/.test(wd)){
+        const file = await wikidataImage(wd);
+        if(file) result = { url:commonsThumb(file,600), caption:file, link:'https://www.wikidata.org/wiki/'+wd };
       }
       // 3) wikipedia → náhled článku
-      if(!result && t.wikipedia && t.wikipedia.includes(':')){
-        const thumb = await wikipediaThumb(t.wikipedia);
-        if(thumb) result = { url:thumb, caption:'Wikipedia', link:wikipediaUrl(t.wikipedia) };
+      if(!result && wp && wp.includes(':')){
+        const thumb = await wikipediaThumb(wp);
+        if(thumb) result = { url:thumb, caption:'Wikipedia', link:wikipediaUrl(wp) };
       }
-      // 4) přímý odkaz na obrázek (jen https kvůli zabezpečení stránky)
-      if(!result && t.image && /^https:\/\//i.test(t.image)){
-        result = { url:t.image, caption:'Foto', link:t.image };
+      // 4) přímý odkaz na obrázek (jen https)
+      if(!result && img && /^https:\/\//i.test(img)){
+        result = { url:img, caption:'Foto', link:img };
       }
     }catch(e){ result = null; }                                 // při chybě nic
     photoCache[site.id] = result;                               // ulož (i null)
