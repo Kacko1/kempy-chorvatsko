@@ -3,7 +3,6 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import readline from 'node:readline';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
@@ -340,16 +339,59 @@ async function downloadFile(url, destination){
   throw lastError || new Error('Stažení výřezu selhalo');
 }
 
+function escapeLiteralControlsInJson(text){
+  let result = '', inString = false, escaped = false;
+  for(const character of text){
+    if(!inString){
+      result += character;
+      if(character === '"') inString = true;
+      continue;
+    }
+    if(escaped){ result += character; escaped = false; continue; }
+    if(character === '\\'){ result += character; escaped = true; continue; }
+    if(character === '"'){ result += character; inString = false; continue; }
+    const code = character.charCodeAt(0);
+    if(code < 0x20){
+      if(character === '\n') result += '\\n';
+      else if(character === '\r') result += '\\r';
+      else if(character === '\t') result += '\\t';
+      else result += '\\u' + code.toString(16).padStart(4,'0');
+    }else result += character;
+  }
+  return result;
+}
+
+function parseGeoJsonRecord(text){
+  try{ return JSON.parse(text); }
+  catch(firstError){
+    const repaired = escapeLiteralControlsInJson(text);
+    if(repaired === text) throw firstError;
+    return JSON.parse(repaired);
+  }
+}
+
+async function* readGeoJsonRecords(input){
+  let buffer = '';
+  for await (const chunk of input){
+    buffer += chunk;
+    const parts = buffer.split('\x1e');
+    buffer = parts.pop() || '';
+    for(const part of parts){
+      const text = part.trim();
+      if(text) yield parseGeoJsonRecord(text);
+    }
+  }
+  const tail = buffer.trim();
+  if(tail) yield parseGeoJsonRecord(tail);
+}
+
 async function parseGeoJsonSequence(file, country){
   const maps = Object.fromEntries(Object.keys(TABS).map(tabId=>[tabId,new Map()]));
   let rawFeatures = 0, skipped = 0;
   const input = createReadStream(file,{encoding:'utf8'});
-  const lines = readline.createInterface({input,crlfDelay:Infinity});
-  for await (let line of lines){
-    line = line.replace(/^\x1e/,'').trim();
-    if(!line) continue;
+  for await (const feature of readGeoJsonRecords(input)){
     rawFeatures++;
-    const item = parseFeature(JSON.parse(line),country);
+    const item = parseFeature(feature,country);
     if(!item){ skipped++; continue; }
     const camp = campFromFeature(item,country);
     if(camp) maps.camps.set(camp.id,camp);
@@ -402,7 +444,7 @@ async function buildCountry(country){
     await run('osmium',['tags-filter','-t','--no-progress','-O','-o',filteredPbf,sourcePbf,...filterExpressions()]);
     console.log('  sestavuji geometrie a souřadnice…');
     await run('osmium',[
-      'export','--no-progress','-O','-f','geojsonseq','-x','print_record_separator=false',
+      'export','--no-progress','-O','-f','geojsonseq',
       '-a','type,id','-i','sparse_file_array,' + locationIndex,'-o',geojsonSeq,filteredPbf
     ]);
     const bundle = await parseGeoJsonSequence(geojsonSeq,country);
@@ -415,7 +457,7 @@ async function buildCountry(country){
   }
 }
 
-function runChecks(){
+async function runChecks(){
   assert.equal(COUNTRIES.length,9);
   assert.equal(Object.keys(TABS).length,7);
   assert.deepEqual(COUNTRIES.map(country=>country.file),[
@@ -436,11 +478,22 @@ function runChecks(){
   assert.equal(sample.id,'way/123');
   assert.deepEqual({lat:sample.lat,lon:sample.lon},{lat:50,lon:15});
   assert.equal(campFromFeature(sample,COUNTRIES[0]).name,'Test');
+  const rawDescription = 'první řádek\ndruhý řádek';
+  const rawRecord = '{"type":"Feature","geometry":{"type":"Point","coordinates":[14.2,50.1]},"properties":{"@type":"node","@id":7,"description":"' + rawDescription + '"}}';
+  const secondRecord = JSON.stringify({type:'Feature',geometry:{type:'Point',coordinates:[14.3,50.2]},properties:{'@type':'node','@id':8}});
+  const sequence = '\x1e' + rawRecord + '\n\x1e' + secondRecord + '\n';
+  const records = [];
+  for await (const record of readGeoJsonRecords(Readable.from([
+    sequence.slice(0,73),sequence.slice(73,141),sequence.slice(141)
+  ]))) records.push(record);
+  assert.equal(records.length,2);
+  assert.equal(records[0].properties.description,rawDescription);
+  assert.equal(records[1].properties['@id'],8);
   console.log('Kontrola Geofabrik generátoru, filtrů a souřadnic: OK');
 }
 
 async function main(){
-  if(process.argv.includes('--check')){ runChecks(); return; }
+  if(process.argv.includes('--check')){ await runChecks(); return; }
   const requested = argumentValue('--countries');
   const countries = requested
     ? requested.split(',').map(id=>id.trim()).filter(Boolean).map(id=>{
