@@ -95,6 +95,9 @@
       padding:7px 30px 7px 10px;border-radius:9px;font-size:12.5px;cursor:pointer;
     }
     #country:focus{outline:none;border-color:var(--sea)}
+    #markCleanup{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+    #markCleanup .btn{padding:6px 9px;font-size:11.5px;white-space:nowrap;border-color:rgba(239,68,68,.65);color:#fca5a5}
+    #markCleanup .btn:hover{background:rgba(239,68,68,.15);border-color:#ef4444;color:#fecaca}
 
     /* Tělo pod horní lištou: sidebar vlevo, mapa vpravo */
     #body{display:flex;flex:1 1 auto;min-height:0;position:relative;overflow:hidden} /* relativní + ořez, aby schované panely nedělaly šířku navíc */
@@ -108,6 +111,10 @@
 
     /* Sekce filtrů (nescrolluje, je nahoře v sidebaru) */
     #filters{padding:12px 14px;border-bottom:1px solid var(--line);flex:0 0 auto}
+    #filterActions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;flex-wrap:wrap}
+    #filterActions span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+    #filterActionButtons{display:flex;align-items:center;gap:6px;margin-left:auto}
+    #resetFilters{padding:5px 9px;font-size:11px;white-space:nowrap}
 
     /* Vyhledávací pole */
     #search{
@@ -408,6 +415,9 @@
       #brand{display:none}                                      /* na mobilu skryj titulek kvůli místu na záložky */
       #detail{width:100%}                                       /* detail přes celou šířku */
       #status{display:none}                                     /* stav skryjeme kvůli místu */
+      #topbar{gap:6px;padding:7px 8px}
+      #markCleanup{width:100%;display:grid;grid-template-columns:1fr 1fr}
+      #markCleanup .btn{justify-content:center;padding:6px 5px;font-size:11px}
     }
   </style>
 </head>
@@ -440,6 +450,11 @@
       </label>
       <!-- Stavový text o datech (naplní JS) -->
       <div id="status">Načítám…</div>
+      <!-- Globální mazání uložených označení; každá akce má vlastní potvrzení -->
+      <div id="markCleanup">
+        <button id="clearFavorites" class="btn" type="button" title="Smazat oblíbená místa ve všech zemích">★ Smazat oblíbené</button>
+        <button id="clearVisited" class="btn" type="button" title="Smazat navštívená místa ve všech zemích">✔ Smazat navštívené</button>
+      </div>
       <!-- Přepínač zdroje dat: offline (uložený soubor) vs online (stahování) -->
       <div id="srcSwitch" class="seg" hidden>
         <button class="segbtn" data-src="baked">📦 Offline</button>
@@ -472,6 +487,12 @@
           <div id="sbmobilehead">
             <span>Filtry</span>
             <button id="sbClose" class="btn">Zobrazit mapu ✕</button>
+          </div>
+          <div id="filterActions">
+            <span>Nastavení výběru</span>
+            <div id="filterActionButtons">
+              <button id="resetFilters" class="btn" type="button" title="Vypnout všechny filtry v aktuální záložce">↺ Reset filtrů</button>
+            </div>
           </div>
           <!-- Vyhledávací pole podle názvu / města -->
           <input id="search" type="text" placeholder="Hledat název nebo město…">
@@ -607,8 +628,11 @@
   const SRC_MODE_KEY = 'travel_map_src_mode_v1'; // zapamatovaný zdroj dat ('baked' / 'live')
   const ZONES_KEY = 'travel_map_zones_visible_v1'; // zapnutá překryvná vrstva zón
   const POINTS_KEY = 'travel_map_points_visible_v1'; // viditelnost míst z datových záložek
+  const VIEW_STATE_KEY = 'travel_map_view_state_v1'; // mapa, záložka, filtry a otevřený objekt podle země
+  const BASE_LAYER_KEY = 'travel_map_base_layer_v1'; // satelitní / klasický mapový podklad
+  const SIDEBAR_KEY = 'travel_map_sidebar_collapsed_v1'; // sbalení levého panelu na počítači
   function countryCfg(){ return COUNTRIES[activeCountry]; }
-  function userKey(){ return 'travel_map_user_'+activeCountry+'_v1'; }
+  function userKey(code=activeCountry){ return 'travel_map_user_'+code+'_v1'; }
   function cacheKey(tabId){
     const version = (TABS[tabId] && TABS[tabId].cacheVersion) || 'v1';
     return 'travel_map_'+activeCountry+'_'+tabId+'_'+version;
@@ -830,6 +854,8 @@
   let visibleRenderFrame = 0;    // sloučení více událostí pohybu mapy do jednoho překreslení
   let lastRenderedZoom = null;   // předchozí zoom pro animaci rozdělení a spojení shluků
   let filterTimer = 0;           // krátké zpoždění hledání, aby se milionový index nestavěl po každé klávese
+  let viewStateSaveTimer = 0;    // sloučí časté změny mapy do jediného zápisu
+  let stateRestoring = false;    // během obnovování nepřepisuj uložený stav výchozími hodnotami
   const LIST_LIMIT = 300;        // nejvýše tolik DOM řádků najednou (hlavně kvůli mobilům)
   let activeId = null;          // ID právě otevřeného místa v detailu
   const tabFetchedAt = {};      // čas stažení dat pro každou záložku
@@ -856,6 +882,114 @@
     try{ localStorage.setItem(key, JSON.stringify(val)); }  // zkus uložit
     catch(e){ /* úložiště nedostupné — pokračuj bez ukládání */ }
   }
+
+  // Malý pracovní stav aplikace. Velká mapová data zůstávají v oddělené cache.
+  let viewState = safeGet(VIEW_STATE_KEY, {countries:{}});
+  if(!viewState || typeof viewState!=='object') viewState = {countries:{}};
+  if(!viewState.countries || typeof viewState.countries!=='object') viewState.countries = {};
+
+  function countryViewState(code=activeCountry){
+    if(!viewState.countries[code] || typeof viewState.countries[code]!=='object'){
+      viewState.countries[code] = {tab:'camps',activeId:null,map:null,tabs:{}};
+    }
+    const state=viewState.countries[code];
+    if(!state.tabs || typeof state.tabs!=='object') state.tabs={};
+    return state;
+  }
+
+  function resetFilterModel(useDefaults){
+    for(const key in flags) flags[key]=false;
+    for(const id in TABS){
+      const cfg=TABS[id];
+      if(!cfg.cats) continue;
+      for(const key in cfg.f) cfg.f[key]=false;
+      cfg.cats.forEach(cat=>cfg.f[cat.key]=false);
+      (cfg.special||[]).forEach(key=>cfg.f[key]=false);
+      cfg.f.web=false; cfg.f.visited=false; cfg.f.fav=false;
+      if(useDefaults && cfg.notableDefault) cfg.f.notable=true;
+    }
+  }
+
+  function captureActiveTabState(){
+    const search=document.getElementById('search');
+    const region=document.getElementById('region');
+    const stars=document.getElementById('stars');
+    const sort=document.getElementById('sort');
+    if(!search || !region || !stars || !sort) return;
+    const countryState=countryViewState();
+    countryState.tabs[activeTab]={
+      search:search.value.slice(0,500),
+      region:region.value,
+      stars:stars.value,
+      sort:sort.value,
+      campFlags:{...flags},
+      poiFilters:{...(activeCfg().f||{})}
+    };
+  }
+
+  function saveCurrentView(){
+    if(stateRestoring) return;
+    const countryState=countryViewState();
+    countryState.tab=activeTab;
+    countryState.activeId=activeId;
+    captureActiveTabState();
+    if(map){
+      const center=map.getCenter();
+      countryState.map={lat:center.lat,lon:center.lng,zoom:map.getZoom()};
+    }
+    safeSet(VIEW_STATE_KEY,viewState);
+  }
+
+  function scheduleViewSave(){
+    if(stateRestoring) return;
+    clearTimeout(viewStateSaveTimer);
+    viewStateSaveTimer=setTimeout(saveCurrentView,120);
+  }
+
+  function restoreActiveTabState(){
+    const saved=countryViewState().tabs[activeTab];
+    resetFilterModel(true);
+    if(saved){
+      if(saved.campFlags) for(const key in flags) flags[key]=!!saved.campFlags[key];
+      if(saved.poiFilters && activeCfg().f){
+        for(const key in activeCfg().f){
+          if(Object.prototype.hasOwnProperty.call(saved.poiFilters,key)) activeCfg().f[key]=!!saved.poiFilters[key];
+        }
+      }
+    }
+    document.getElementById('search').value=saved&&typeof saved.search==='string' ? saved.search : '';
+    document.getElementById('stars').value=saved&&['0','2','3','4'].includes(String(saved.stars)) ? String(saved.stars) : '0';
+    document.getElementById('sort').value=saved&&['name','dist','stars','region'].includes(saved.sort) ? saved.sort : 'name';
+    const region=saved&&typeof saved.region==='string' ? saved.region : '';
+    const regionSelect=document.getElementById('region');
+    regionSelect.value=[...regionSelect.options].some(option=>option.value===region) ? region : '';
+    document.querySelectorAll('.pill[data-filter]').forEach(p=>p.classList.toggle('on',!!flags[p.getAttribute('data-filter')]));
+    if(isPoi()) buildPoiChips(activeCfg());
+  }
+
+  function resetCurrentFilters(){
+    resetFilterModel(false);
+    document.getElementById('search').value='';
+    document.getElementById('region').value='';
+    document.getElementById('stars').value='0';
+    document.getElementById('sort').value='name';
+    document.querySelectorAll('.pill[data-filter]').forEach(p=>p.classList.remove('on'));
+    if(isPoi()) buildPoiChips(activeCfg());
+    applyFilters();
+    saveCurrentView();
+    toast('Filtry aktuální záložky byly vypnuty');
+  }
+
+  function restoreSavedDetail(){
+    const countryState=countryViewState();
+    const id=countryState.tab===activeTab ? countryState.activeId : null;
+    if(id && ALL.some(site=>site.id===id)) openDetail(id);
+    else{
+      activeId=null;
+      document.getElementById('detail').classList.remove('open');
+      if(id) countryState.activeId=null;
+    }
+  }
   // Načtení mých editací
   function loadUser(){ return safeGet(userKey(), {}); }      // objekt {id: {...}} nebo prázdný pro vybranou zemi
   // Uložení mých editací
@@ -868,14 +1002,59 @@
   function isVisited(site){ const u=USER[site.id]; return !!(u && u.visited); } // byl jsem tam?
   function isFav(site){ const u=USER[site.id]; return !!(u && u.fav); }         // oblíbené?
 
-  // Přepne stav (visited/fav), uloží a překreslí mapu, seznam i detail
+  // Přepne označení (visited/fav), uloží a překreslí mapu, seznam i detail.
   function toggleMark(id, kind){
     const u = USER[id] || {};                                 // stávající editace
-    u[kind] = !u[kind];                                       // přepni příznak
+    u[kind] = !u[kind];                                       // další klik označení zase odebere
     USER[id] = u;                                             // zapiš zpět
     saveUser();                                               // ulož do prohlížeče
     applyFilters();                                           // překresli značky + seznam
     openDetail(id);                                           // obnov stav tlačítek v detailu
+  }
+
+  // Globálně odstraní pouze zvolený typ označení. Adresy, weby, poznámky
+  // i druhý typ označení zůstanou zachované.
+  function clearMarksGlobally(kind){
+    if(kind!=='fav' && kind!=='visited') return;
+    const favorite=kind==='fav';
+    const label=favorite ? 'oblíbená místa' : 'navštívená místa';
+    saveCurrentView();
+    const accepted=window.confirm(
+      'Opravdu chceš nenávratně smazat všechna '+label+' ve všech zemích?\n\nOstatní uložené údaje a označení zůstanou zachované.'
+    );
+    if(!accepted) return;
+
+    let removed=0;
+    for(const code of Object.keys(COUNTRIES)){
+      const data=code===activeCountry ? USER : safeGet(userKey(code),{});
+      if(!data || typeof data!=='object') continue;
+      let changed=false;
+      for(const id of Object.keys(data)){
+        const entry=data[id];
+        if(!entry || typeof entry!=='object') continue;
+        if(Object.prototype.hasOwnProperty.call(entry,kind)){
+          if(entry[kind]) removed++;
+          delete entry[kind]; changed=true;
+        }
+        if(!Object.keys(entry).length) delete data[id];         // prázdný záznam už není potřeba
+      }
+      if(changed) safeSet(userKey(code),data);
+      if(code===activeCountry) USER=data;
+    }
+
+    // Po globálním vymazání vypni odpovídající filtr, jinak by byl seznam prázdný.
+    for(const countryState of Object.values(viewState.countries||{})){
+      for(const tabState of Object.values((countryState&&countryState.tabs)||{})){
+        if(tabState.campFlags) tabState.campFlags[kind]=false;
+        if(tabState.poiFilters) tabState.poiFilters[kind]=false;
+      }
+    }
+    safeSet(VIEW_STATE_KEY,viewState);
+    restoreActiveTabState();
+    applyFilters();
+    if(activeId) openDetail(activeId);                          // obnov tlačítka v otevřeném detailu
+    const what=favorite ? 'oblíbených míst' : 'navštívených míst';
+    toast(removed ? ('Smazáno '+removed+' '+what) : ('Žádná '+label+' nebyla nalezena'));
   }
 
   // HTML dvojice tlačítek „Byl jsem tady" / „Oblíbené" do detailu
@@ -1386,15 +1565,23 @@
     const cfg = countryCfg();
     document.getElementById('country').value = activeCountry;
     document.getElementById('region').options[0].textContent = 'Celá země — '+cfg.label;
-    if(moveMap && map) map.setView(cfg.center, cfg.zoom);
+    if(moveMap && map){
+      const saved=countryViewState().map;
+      const valid=saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon) && Number.isFinite(saved.zoom);
+      map.setView(valid ? [saved.lat,saved.lon] : cfg.center, valid ? saved.zoom : cfg.zoom);
+    }
   }
 
   // Přepne zemi, oddělí její cache i uživatelská data a zachová zvolený offline/online režim.
   async function switchCountry(code, initial){
     if(!COUNTRIES[code]) code = 'cz';
     if(!initial && code===activeCountry) return;
+    if(!initial) saveCurrentView();
+    stateRestoring=true;
     activeCountry = code;
     safeSet(COUNTRY_KEY, activeCountry);
+    const savedCountryState=countryViewState();
+    activeTab=TABS[savedCountryState.tab] ? savedCountryState.tab : 'camps';
     refreshQueries();
     for(const id in DATA) delete DATA[id];
     for(const id in tabFetchedAt) delete tabFetchedAt[id];
@@ -1404,23 +1591,26 @@
     renderZoneOverlay();
     USER = loadUser();
     closeDetail();
-    document.getElementById('search').value = '';
-    document.getElementById('region').value = '';
     updateCountryUI(true);
     updateTabUI();
 
-    const hasBaked = await loadBaked();
-    if(sourceMode==='baked'){
-      if(hasBaked){
-        await applyBaked(); ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]);
+    try{
+      const hasBaked = await loadBaked();
+      if(sourceMode==='baked'){
+        if(hasBaked){
+          await applyBaked(); ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]);
+        }else{
+          afterLoad(null);
+          toast(bakedLoadError
+            ? ('Data pro '+countryCfg().label+' nelze načíst: '+bakedLoadError.message)
+            : ('Pro '+countryCfg().label+' chybí '+bakedFilename()+' — spusť aktualizaci dat na GitHubu'));
+        }
       }else{
-        afterLoad(null);
-        toast(bakedLoadError
-          ? ('Data pro '+countryCfg().label+' nelze načíst: '+bakedLoadError.message)
-          : ('Pro '+countryCfg().label+' chybí '+bakedFilename()+' — spusť aktualizaci dat na GitHubu'));
+        await loadData();
       }
-    }else{
-      loadData();
+    }finally{
+      stateRestoring=false;
+      saveCurrentView();
     }
   }
   // Převod syrové Overpass odpovědi na naše zjednodušené objekty
@@ -1658,6 +1848,7 @@
   function initMap(){
     // Vytvoř mapu se středem aktuálně vybrané země (při prvním startu Česko)
     const cc = countryCfg();
+    document.getElementById('body').classList.toggle('sb-collapsed',!!safeGet(SIDEBAR_KEY,false));
     map = L.map('map', {zoomControl:true,maxZoom:19}).setView(cc.center, cc.zoom); // střed a zoom
 
     // Satelitní (fotografická) podkladová vrstva – Esri World Imagery (zdarma, bez klíče)
@@ -1698,9 +1889,13 @@
       {position:'topright',collapsed:window.matchMedia('(max-width:700px)').matches}
     ).addTo(map);                                                // přidej na mapu
 
-    satGroup.addTo(map);                                         // satelit jako výchozí (chtěná fotomapa)
+    const savedBaseLayer=safeGet(BASE_LAYER_KEY,'satellite');
+    (savedBaseLayer==='street' ? street : satGroup).addTo(map);  // obnov poslední použitý podklad
 
-    map.on('moveend zoomend', scheduleVisibleRender);
+    map.on('moveend zoomend', ()=>{ scheduleVisibleRender(); scheduleViewSave(); });
+    map.on('baselayerchange',event=>{
+      safeSet(BASE_LAYER_KEY,event.layer===street ? 'street' : 'satellite');
+    });
 
     map.on('overlayadd',async event=>{
       if(event.layer === cluster){
@@ -2174,6 +2369,7 @@
 
     renderList(FILTERED);                                       // překresli seznam
     renderMarkers(FILTERED);                                    // překresli značky
+    scheduleViewSave();                                         // zapamatuj právě nastavené filtry
   }
 
   /* =========================================================================
@@ -2259,6 +2455,7 @@
     const site = ALL.find(s=>s.id===id);                       // najdi místo
     if(!site) return;                                          // pojistka
     activeId = id;                                             // zapamatuj aktivní
+    scheduleViewSave();                                        // obnoví se i po zavření nebo načtení stránky
     const u = USER[id] || {};                                  // moje editace
     const nameLink = document.getElementById('dname');        // klikací název v hlavičce
     nameLink.textContent = site.name;
@@ -2609,6 +2806,7 @@
   function closeDetail(){
     document.getElementById('detail').classList.remove('open'); // odeber třídu = panel zajede
     activeId = null;                                            // není aktivní kemp
+    scheduleViewSave();                                         // uživatel detail skutečně zavřel
   }
 
   /* =========================================================================
@@ -2722,34 +2920,41 @@
 
   async function switchTab(tab){
     if(tab === activeTab) return;                             // už jsme tam
-    activeTab = tab;                                          // změň aktivní záložku
-    updateTabUI();                                           // vzhled: barvy, filtry, legenda
-    closeDetail();                                           // zavři případný detail
-    if(sourceMode === 'baked' && bakedData && bakedData.compressed === 'gzip-tabs-base64-v1'){
-      // Uvolni předchozí velkou záložku. Zabalená kopie zůstává v bakedData a lze ji znovu rozbalit.
-      for(const id in DATA) delete DATA[id];
-      for(const id in tabFetchedAt) delete tabFetchedAt[id];
-      ALL = []; FILTERED = [];
-      renderMarkers([]); renderList([]);
-      try{
-        const loaded = await loadBakedPart(tab);
-        ALL = loaded ? getTabData(tab) : [];
-        afterLoad(tabFetchedAt[tab]);
-      }catch(e){
-        console.error(e); ALL=[]; afterLoad(null); toast('Záložku se nepodařilo rozbalit');
+    saveCurrentView();                                        // ulož filtry opouštěné záložky
+    stateRestoring=true;
+    try{
+      activeTab = tab;                                        // změň aktivní záložku
+      updateTabUI();                                          // vzhled: barvy, filtry, legenda
+      closeDetail();                                          // zavři případný detail
+      if(sourceMode === 'baked' && bakedData && bakedData.compressed === 'gzip-tabs-base64-v1'){
+        // Uvolni předchozí velkou záložku. Zabalená kopie zůstává v bakedData a lze ji znovu rozbalit.
+        for(const id in DATA) delete DATA[id];
+        for(const id in tabFetchedAt) delete tabFetchedAt[id];
+        ALL = []; FILTERED = [];
+        renderMarkers([]); renderList([]);
+        try{
+          const loaded = await loadBakedPart(tab);
+          ALL = loaded ? getTabData(tab) : [];
+          afterLoad(tabFetchedAt[tab]);
+        }catch(e){
+          console.error(e); ALL=[]; afterLoad(null); toast('Záložku se nepodařilo rozbalit');
+        }
+        return;
       }
-      return;
-    }
-    const data = getTabData(tab);                            // už načtená data?
-    if(data && data.length){                                 // ano → jen aktivuj
-      ALL = data;                                            // přepni dataset
-      afterLoad(tabFetchedAt[tab]);                          // vykresli
-    }else if(sourceMode === 'baked'){                        // offline režim: NIKDY nestahuj
-      ALL = []; FILTERED = [];                               // prázdno
-      afterLoad(tabFetchedAt[tab]);                          // vykresli prázdný stav
-      toast('Tato záložka není v uloženém souboru — přepni na Online nebo vygeneruj soubor znovu');
-    }else{
-      await loadData();                                      // online: načti (cache/stažení)
+      const data = getTabData(tab);                           // už načtená data?
+      if(data && data.length){                                // ano → jen aktivuj
+        ALL = data;                                           // přepni dataset
+        afterLoad(tabFetchedAt[tab]);                         // vykresli
+      }else if(sourceMode === 'baked'){                       // offline režim: NIKDY nestahuj
+        ALL = []; FILTERED = [];                              // prázdno
+        afterLoad(tabFetchedAt[tab]);                         // vykresli prázdný stav
+        toast('Tato záložka není v uloženém souboru — přepni na Online nebo vygeneruj soubor znovu');
+      }else{
+        await loadData();                                     // online: načti (cache/stažení)
+      }
+    }finally{
+      stateRestoring=false;
+      saveCurrentView();
     }
   }
 
@@ -2833,6 +3038,7 @@
       if(open) closeSidebar(); else openSidebar();               // přepni překryv
     }else{                                                       // velká obrazovka = sbalení
       document.getElementById('body').classList.toggle('sb-collapsed'); // schovej/ukaž menu
+      safeSet(SIDEBAR_KEY,document.getElementById('body').classList.contains('sb-collapsed'));
       setTimeout(()=>{ if(map) map.invalidateSize(); }, 60);     // po reflow přepočítej mapu
     }
   }
@@ -2843,7 +3049,9 @@
 
   function afterLoad(fetchedAt){
     fillRegions();                                             // naplň oblasti
+    restoreActiveTabState();                                  // vrať hledání, výběry a přepínače této záložky
     applyFilters();                                           // první vykreslení seznamu a značek
+    restoreSavedDetail();                                     // znovu otevři naposledy prohlížený objekt, pokud stále existuje
     // Aktualizuj stavový text nahoře (počet + čas)
     const when = fetchedAt ? new Date(fetchedAt).toLocaleString('cs-CZ') : '—'; // formátovaný čas
     document.getElementById('status').textContent =
@@ -2873,6 +3081,7 @@
         toast('Zapínám polohu pro řazení podle vzdálenosti…');  // informuj (seznam se seřadí po zaměření)
       }
       renderList(FILTERED);                                     // řazení mění jen omezený viditelný seznam
+      scheduleViewSave();                                       // zapamatuj řazení
     });
 
     // Přepínatelné pilulky KEMPŮ (data-filter → flags)
@@ -2888,6 +3097,9 @@
     document.querySelectorAll('.tab').forEach(b=>{
       b.addEventListener('click', ()=> switchTab(b.getAttribute('data-tab')));
     });
+    document.getElementById('resetFilters').addEventListener('click',resetCurrentFilters);
+    document.getElementById('clearFavorites').addEventListener('click',()=>clearMarksGlobally('fav'));
+    document.getElementById('clearVisited').addEventListener('click',()=>clearMarksGlobally('visited'));
 
     // Tlačítko aktualizace dat: ručně stáhni čerstvá data aktivní záložky
     document.getElementById('refresh').addEventListener('click', ()=> downloadFresh(true));
@@ -2907,6 +3119,7 @@
 
     // Klávesa Esc zavře detail
     document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDetail(); });
+    window.addEventListener('beforeunload',saveCurrentView);     // poslední pojistka před obnovením / zavřením
   }
 
   /* =========================================================================
