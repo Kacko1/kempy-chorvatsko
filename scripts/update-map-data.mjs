@@ -22,7 +22,10 @@ const COUNTRIES = [
   { id:'cz', iso:'CZ', label:'Česko', file:'cesko_data.json', nameTag:'name:cs' },
   { id:'at', iso:'AT', label:'Rakousko', file:'rakousko_data.json', nameTag:'name:de' },
   { id:'si', iso:'SI', label:'Slovinsko', file:'slovinsko_data.json', nameTag:'name:sl' },
-  { id:'hr', iso:'HR', label:'Chorvatsko', file:'chorvatsko_data.json', nameTag:'name:hr' }
+  { id:'hr', iso:'HR', label:'Chorvatsko', file:'chorvatsko_data.json', nameTag:'name:hr' },
+  { id:'pl', iso:'PL', label:'Polsko', file:'polsko_data.json', nameTag:'name:pl' },
+  { id:'sk', iso:'SK', label:'Slovensko', file:'slovensko_data.json', nameTag:'name:sk' },
+  { id:'de', iso:'DE', label:'Německo', file:'nemecko_data.json', nameTag:'name:de' }
 ];
 
 const TABS = {
@@ -244,6 +247,9 @@ function regionOf(countryId, lat, lon){
   if(countryId === 'cz') return lon < 15.3 ? 'Čechy' : (lon < 17.2 ? 'Morava' : 'Slezsko');
   if(countryId === 'at') return lon < 12.6 ? 'Západní Rakousko' : (lon < 15.2 ? 'Střední Rakousko' : 'Východní Rakousko');
   if(countryId === 'si') return lon < 14.4 ? 'Západní Slovinsko' : (lon < 15.3 ? 'Střední Slovinsko' : 'Východní Slovinsko');
+  if(countryId === 'pl') return lon < 17.2 ? 'Západní Polsko' : (lon < 20.5 ? 'Střední Polsko' : 'Východní Polsko');
+  if(countryId === 'sk') return lon < 18.3 ? 'Západní Slovensko' : (lon < 20.5 ? 'Střední Slovensko' : 'Východní Slovensko');
+  if(countryId === 'de') return lon < 8.5 ? 'Západní Německo' : (lon < 12.5 ? 'Střední Německo' : 'Východní Německo');
   return 'Ostatní';
 }
 
@@ -376,10 +382,11 @@ async function buildCountry(country){
 }
 
 function runChecks(){
-  assert.equal(COUNTRIES.length, 4);
+  assert.equal(COUNTRIES.length, 7);
   assert.equal(Object.keys(TABS).length, 7);
   assert.deepEqual(COUNTRIES.map(country=>country.file), [
-    'cesko_data.json','rakousko_data.json','slovinsko_data.json','chorvatsko_data.json'
+    'cesko_data.json','rakousko_data.json','slovinsko_data.json','chorvatsko_data.json',
+    'polsko_data.json','slovensko_data.json','nemecko_data.json'
   ]);
   for(const country of COUNTRIES){
     for(const tabId of Object.keys(TABS)){
@@ -425,17 +432,25 @@ async function main(){
     await probeCountry(probeCountryId, argumentValue('--probe-tab'));
     return;
   }
+  const requestedCountryIds = argumentValue('--countries');
+  const countriesToBuild = requestedCountryIds
+    ? requestedCountryIds.split(',').map(id=>id.trim()).filter(Boolean).map(id=>{
+        const country = COUNTRIES.find(item=>item.id === id);
+        if(!country) throw new Error('Neznámý kód země: ' + id);
+        return country;
+      })
+    : COUNTRIES;
   await rm(TEMP_DIR, { recursive:true, force:true });
   await mkdir(TEMP_DIR, { recursive:true });
   try{
-    for(let index=0; index<COUNTRIES.length; index++){
-      await buildCountry(COUNTRIES[index]);
-      if(index < COUNTRIES.length - 1) await sleep(DELAY_MS);
+    for(let index=0; index<countriesToBuild.length; index++){
+      await buildCountry(countriesToBuild[index]);
+      if(index < countriesToBuild.length - 1) await sleep(DELAY_MS);
     }
-    for(const country of COUNTRIES){
+    for(const country of countriesToBuild){
       await copyFile(path.join(TEMP_DIR, country.file), path.join(OUTPUT_DIR, country.file));
     }
-    console.log('\nVšechny čtyři JSON soubory byly úspěšně nahrazeny.');
+    console.log('\nVšechny datové soubory byly úspěšně nahrazeny.');
   }catch(error){
     console.error('\nAktualizace selhala. Produkční JSON soubory zůstaly beze změny.');
     throw error;
