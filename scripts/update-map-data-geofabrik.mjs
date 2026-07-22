@@ -504,14 +504,25 @@ async function parseGeoJsonSequence(file, country){
 }
 
 function compressBundle(bundle){
-  const source = Buffer.from(JSON.stringify(bundle),'utf8');
-  // Nativní zlib je u velkých zemí řádově rychlejší než původní čistě
-  // JavaScriptový LZ-String. Úroveň 6 dává dobrý poměr rychlosti a velikosti.
-  const compressed = gzipSync(source,{level:6});
+  // Každou záložku balíme zvlášť. Prohlížeč tak u velkého Německa rozbalí jen
+  // právě otevřenou kategorii, ne několik milionů objektů ze všech záložek.
+  const parts = {};
+  let sourceBytes = 0;
+  let compressedBytes = 0;
+  for(const [id,value] of Object.entries(bundle)){
+    if(id === '_meta') continue;
+    const source = Buffer.from(JSON.stringify(value),'utf8');
+    // Nativní zlib je u velkých zemí řádově rychlejší než původní čistě
+    // JavaScriptový LZ-String. Úroveň 6 dává dobrý poměr rychlosti a velikosti.
+    const compressed = gzipSync(source,{level:6});
+    parts[id] = {z:compressed.toString('base64')};
+    sourceBytes += source.length;
+    compressedBytes += compressed.length;
+  }
   return {
-    payload:JSON.stringify({compressed:'gzip-base64-v1',z:compressed.toString('base64')}),
-    sourceBytes:source.length,
-    compressedBytes:compressed.length
+    payload:JSON.stringify({compressed:'gzip-tabs-base64-v1',_meta:bundle._meta,parts}),
+    sourceBytes,
+    compressedBytes
   };
 }
 
@@ -583,10 +594,10 @@ async function runChecks(){
   const compressionSample = {camps:{fetchedAt:1,data:[{id:'node/1',lat:50.1,lon:14.2,name:'Test'}]}};
   const compressedSample = compressBundle(compressionSample);
   const compressedWrapper = JSON.parse(compressedSample.payload);
-  assert.equal(compressedWrapper.compressed,'gzip-base64-v1');
+  assert.equal(compressedWrapper.compressed,'gzip-tabs-base64-v1');
   assert.deepEqual(
-    JSON.parse(gunzipSync(Buffer.from(compressedWrapper.z,'base64')).toString('utf8')),
-    compressionSample
+    JSON.parse(gunzipSync(Buffer.from(compressedWrapper.parts.camps.z,'base64')).toString('utf8')),
+    compressionSample.camps
   );
   const rawDescription = 'první řádek\ndruhý řádek';
   const rawRecord = '{"type":"Feature","geometry":{"type":"Point","coordinates":[14.2,50.1]},"properties":{"@type":"node","@id":7,"description":"' + rawDescription + '"}}';
