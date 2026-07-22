@@ -775,6 +775,8 @@
   let FILTERED = [];            // aktuálně vyfiltrovaná data
   let USER = loadUser();        // moje uložené editace podle ID
   let map, cluster, layers;     // mapa, vrstva shluků, podkladové vrstvy
+  let nominatimPending = false; // ochrana veřejného geokodéru před souběžnými požadavky
+  let lastNominatimAt = 0;      // Nominatim dovoluje nejvýše jeden požadavek za sekundu
   const markerById = {};        // rychlý přístup ke značce podle ID
   let activeId = null;          // ID právě otevřeného místa v detailu
   const tabFetchedAt = {};      // čas stažení dat pro každou záložku
@@ -1423,7 +1425,7 @@
     // Satelitní (fotografická) podkladová vrstva – Esri World Imagery (zdarma, bez klíče)
     const sat = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      {maxZoom:19, attribution:'Snímky © Esri'}                  // atribuce Esri
+      {maxZoom:19, attribution:'Snímky © Esri · Data objektů © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>'}
     );
     // Popisková vrstva navrch satelitu (názvy měst, hranice) pro lepší orientaci
     const labels = L.tileLayer(
@@ -1435,8 +1437,8 @@
 
     // Klasická uliční mapa OpenStreetMap
     const street = L.tileLayer(
-      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {maxZoom:19, attribution:'© přispěvatelé OpenStreetMap'}   // atribuce OSM
+      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {maxZoom:19, attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>'}
     );
 
     // Přepínač podkladových vrstev vpravo nahoře
@@ -2125,9 +2127,14 @@
 
   // Reverzní geokódování přes Nominatim: ze souřadnic zjistí adresu (na vyžádání)
   async function reverseGeocode(site){
+    if(nominatimPending) return;                               // jeden požadavek v jeden okamžik
+    nominatimPending = true;
     const box = document.getElementById('addrBox');            // místo, kam adresu vypíšeme
     if(box) box.innerHTML = '<span style="color:var(--muted)">Zjišťuji adresu…</span>'; // dočasný text
     try{
+      const wait = Math.max(0, 1000 - (Date.now() - lastNominatimAt));
+      if(wait) await sleep(wait);                              // dodrž maximálně 1 požadavek/s
+      lastNominatimAt = Date.now();
       const url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2'
         + '&lat='+site.lat+'&lon='+site.lon+'&zoom=18&accept-language=cs'; // sestavená URL dotazu
       const res = await fetch(url, {headers:{'Accept':'application/json'}}); // odešli požadavek
@@ -2146,6 +2153,8 @@
       }
     }catch(e){
       if(box) box.innerHTML = '<span style="color:var(--danger)">Adresu se teď nepodařilo zjistit.</span>'; // chyba
+    }finally{
+      nominatimPending = false;
     }
   }
 
