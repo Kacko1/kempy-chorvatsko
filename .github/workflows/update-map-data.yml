@@ -11,36 +11,99 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  update-data:
+  build-country:
+    name: Zpracování – ${{ matrix.label }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - country: cz
+            label: Česko
+            file: cesko_data.json
+          - country: hr
+            label: Chorvatsko
+            file: chorvatsko_data.json
+          - country: it
+            label: Itálie
+            file: italie_data.json
+          - country: de
+            label: Německo
+            file: nemecko_data.json
+          - country: pl
+            label: Polsko
+            file: polsko_data.json
+          - country: at
+            label: Rakousko
+            file: rakousko_data.json
+          - country: sk
+            label: Slovensko
+            file: slovensko_data.json
+          - country: si
+            label: Slovinsko
+            file: slovinsko_data.json
+          - country: ch
+            label: Švýcarsko
+            file: svycarsko_data.json
 
     steps:
       - name: Načtení repozitáře
-        uses: actions/checkout@v7
+        uses: actions/checkout@v6
 
       - name: Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v6
         with:
           node-version: "24"
 
       - name: Instalace komprese JSON
         run: npm install --no-save --ignore-scripts --no-audit --no-fund lz-string@1.5.0
 
-      - name: Kontrola generátoru
-        run: node scripts/update-map-data.mjs --check
+      - name: Instalace nástroje Osmium
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends osmium-tool
 
-      - name: Stažení všech zemí
+      - name: Kontrola generátoru
+        run: node scripts/update-map-data-geofabrik.mjs --check
+
+      - name: Stažení a zpracování výřezů Geofabrik
         env:
           NODE_OPTIONS: --max-old-space-size=6144
-          OVERPASS_DELAY_MS: "20000"
-          OVERPASS_RETRY_MS: "60000"
-          OVERPASS_TIMEOUT_MS: "300000"
-          OVERPASS_MAX_ATTEMPTS: "5"
-        run: node scripts/update-map-data.mjs
+          GEOFABRIK_TIMEOUT_MS: "3600000"
+          GEOFABRIK_MAX_ATTEMPTS: "3"
+        run: node scripts/update-map-data-geofabrik.mjs --countries "${{ matrix.country }}"
+
+      - name: Předání výsledku
+        uses: actions/upload-artifact@v7
+        with:
+          name: map-data-${{ matrix.country }}
+          path: ${{ matrix.file }}
+          if-no-files-found: error
+          retention-days: 1
+
+  update-data:
+    name: Uložení všech zemí
+    needs: build-country
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+
+    steps:
+      - name: Načtení repozitáře
+        uses: actions/checkout@v6
+
+      - name: Stažení výsledků všech zemí
+        uses: actions/download-artifact@v8
+        with:
+          pattern: map-data-*
+          path: .
+          merge-multiple: true
 
       - name: Uložení změněných JSON souborů
         shell: bash
