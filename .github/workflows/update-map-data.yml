@@ -18,6 +18,8 @@ jobs:
     name: Zpracování – ${{ matrix.label }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -54,14 +56,13 @@ jobs:
     steps:
       - name: Načtení repozitáře
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "24"
-
-      - name: Instalace komprese JSON
-        run: npm install --no-save --ignore-scripts --no-audit --no-fund lz-string@1.5.0
 
       - name: Instalace nástroje Osmium
         run: |
@@ -72,13 +73,53 @@ jobs:
         run: node scripts/update-map-data-geofabrik.mjs --check
 
       - name: Stažení a zpracování výřezů Geofabrik
+        id: generate
         env:
           NODE_OPTIONS: --max-old-space-size=6144
           GEOFABRIK_TIMEOUT_MS: "3600000"
           GEOFABRIK_MAX_ATTEMPTS: "3"
         run: node scripts/update-map-data-geofabrik.mjs --countries "${{ matrix.country }}"
 
-      - name: Předání výsledku
+      - name: Okamžité uložení JSONu země
+        shell: bash
+        env:
+          DATA_FILE: ${{ matrix.file }}
+          COUNTRY_LABEL: ${{ matrix.label }}
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: |
+          if [[ -z "$(git status --porcelain -- "$DATA_FILE")" ]]; then
+            echo "$COUNTRY_LABEL: JSON se nezměnil."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "$DATA_FILE"
+          git commit -m "Automatická aktualizace: $COUNTRY_LABEL"
+
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$TARGET_BRANCH"
+            if ! git rebase "origin/$TARGET_BRANCH"; then
+              git rebase --abort || true
+              echo "$COUNTRY_LABEL: změnu nelze bezpečně sloučit s aktuální větví."
+              exit 1
+            fi
+            if git push origin "HEAD:$TARGET_BRANCH"; then
+              echo "$COUNTRY_LABEL: JSON byl uložen do repozitáře."
+              exit 0
+            fi
+            echo "$COUNTRY_LABEL: souběžný push, opakuji pokus $attempt/5."
+            sleep $((attempt * 5))
+          done
+
+          echo "$COUNTRY_LABEL: JSON se nepodařilo pushnout ani po pěti pokusech."
+          exit 1
+
+      # Artefakt je záloha pro závěrečný krok. Vytvoří se i tehdy, když se
+      # okamžitý push nepodařil, ale samotné zpracování země bylo úspěšné.
+      - name: Předání výsledku jako zálohy
+        if: ${{ always() && steps.generate.outcome == 'success' }}
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: map-data-${{ matrix.country }}
@@ -87,8 +128,11 @@ jobs:
           retention-days: 1
 
   update-data:
-    name: Uložení všech zemí
+    name: Kontrola a uložení zbývajících výsledků
     needs: build-country
+    # Selhání jedné země nesmí zahodit JSONy ostatních. Při ručním zrušení
+    # běhu ale nedokončené výsledky záměrně neukládáme.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -97,8 +141,11 @@ jobs:
     steps:
       - name: Načtení repozitáře
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
 
-      - name: Stažení výsledků všech zemí
+      - name: Stažení výsledků úspěšných zemí
         uses: actions/download-artifact@v8
         with:
           pattern: map-data-*
@@ -116,5 +163,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json slovinsko_data.json svycarsko_data.json
-          git commit -m "Automatická aktualizace mapových dat"
+          echo "Ukládám tyto změněné JSONy:"
+          git status --short -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json slovinsko_data.json svycarsko_data.json
+
+          git commit -m "Automatická aktualizace dostupných mapových dat"
           git push
