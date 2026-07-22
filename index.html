@@ -261,6 +261,9 @@
     .marker-cluster div{background:rgba(45,212,191,.85);color:#04231f;font-weight:700} /* vnitřní kruh s číslem */
     .sc-cluster{background:rgba(45,212,191,.28);border:2px solid rgba(45,212,191,.55);border-radius:50%;display:flex;align-items:center;justify-content:center;box-sizing:border-box}
     .sc-cluster span{background:rgba(45,212,191,.9);color:#04231f;border-radius:50%;width:78%;height:78%;display:flex;align-items:center;justify-content:center;font:700 10px/1 system-ui;white-space:nowrap}
+    .sc-cluster span,.mk-wrap .mkwrap{will-change:transform,opacity}
+    .zone-marker-cluster{background:rgba(37,99,235,.28);border:2px solid rgba(147,197,253,.9);border-radius:50%;display:flex;align-items:center;justify-content:center;box-sizing:border-box}
+    .zone-marker-cluster span{background:rgba(37,99,235,.94);color:#fff;border-radius:50%;width:78%;height:78%;display:flex;align-items:center;justify-content:center;font:800 11px/1 system-ui;white-space:nowrap}
     .list-note{padding:8px 14px;border-bottom:1px solid var(--line);color:var(--muted);font-size:11px;line-height:1.35}
 
     /* Překryvná dopravní vrstva: plochy zón a značky placeného parkování */
@@ -603,6 +606,7 @@
   const COUNTRY_KEY = 'travel_map_country_v1';
   const SRC_MODE_KEY = 'travel_map_src_mode_v1'; // zapamatovaný zdroj dat ('baked' / 'live')
   const ZONES_KEY = 'travel_map_zones_visible_v1'; // zapnutá překryvná vrstva zón
+  const POINTS_KEY = 'travel_map_points_visible_v1'; // viditelnost míst z datových záložek
   function countryCfg(){ return COUNTRIES[activeCountry]; }
   function userKey(){ return 'travel_map_user_'+activeCountry+'_v1'; }
   function cacheKey(tabId){
@@ -817,12 +821,14 @@
   let ZONES = [];               // zóny aktuální země načtené z přibaleného JSONu
   let zonesAvailable = false;   // rozliší starší JSON bez vrstvy od země s nulovým počtem zón
   let zonesEnabled = !!safeGet(ZONES_KEY, false);
+  let pointsEnabled = safeGet(POINTS_KEY, true) !== false; // výchozí stav je zapnuto
   let nominatimPending = false; // ochrana veřejného geokodéru před souběžnými požadavky
   let lastNominatimAt = 0;      // Nominatim dovoluje nejvýše jeden požadavek za sekundu
   const markerById = {};        // rychlý přístup ke značce podle ID
   let spatialIndex = null;       // index všech vyfiltrovaných bodů pro aktuální záložku
   let spatialSites = [];         // pořadí objektů odpovídající indexům ve spatialIndex
   let visibleRenderFrame = 0;    // sloučení více událostí pohybu mapy do jednoho překreslení
+  let lastRenderedZoom = null;   // předchozí zoom pro animaci rozdělení a spojení shluků
   let filterTimer = 0;           // krátké zpoždění hledání, aby se milionový index nestavěl po každé klávese
   const LIST_LIMIT = 300;        // nejvýše tolik DOM řádků najednou (hlavně kvůli mobilům)
   let activeId = null;          // ID právě otevřeného místa v detailu
@@ -1579,7 +1585,7 @@
     const osmId = String(zone.id || '').split('/');
     const osm = osmId.length===2 && /^(node|way|relation)$/.test(osmId[0]) && /^\d+$/.test(osmId[1])
       ? `https://www.openstreetmap.org/${osmId[0]}/${osmId[1]}` : null;
-    const mapsQuery = encodeURIComponent((zone.name || type.label)+' '+zone.lat+','+zone.lon);
+    const mapsQuery = encodeURIComponent(zone.lat+','+zone.lon); // přesný bod; obecný název by mohl skončit jinde
     return `<div class="zone-popup">
       <h3>${esc(zone.name || type.label)}</h3>
       <div class="zone-type" style="color:${type.color}">${esc(type.label)}</div>
@@ -1593,6 +1599,17 @@
   function zoneStyle(kind){
     const type = ZONE_TYPES[kind] || ZONE_TYPES.limited_traffic;
     return {color:type.color,weight:3,opacity:.9,fillColor:type.color,fillOpacity:type.fillOpacity,dashArray:kind==='toll'?'8 5':null};
+  }
+
+  function zoneClusterIcon(group){
+    const count=group.getChildCount();
+    const digits=String(count).length;
+    const size=digits>=5 ? 52 : digits>=4 ? 46 : 40;
+    return L.divIcon({
+      className:'zone-marker-cluster',
+      html:'<span>'+Number(count).toLocaleString('cs-CZ')+'</span>',
+      iconSize:[size,size],iconAnchor:[size/2,size/2]
+    });
   }
 
   function updateZoneLegend(){
@@ -1663,24 +1680,33 @@
     );
 
     zoneShapes = L.layerGroup();
-    zoneParking = L.markerClusterGroup({maxClusterRadius:42,showCoverageOnHover:false,disableClusteringAtZoom:16});
+    zoneParking = L.markerClusterGroup({
+      maxClusterRadius:42,showCoverageOnHover:false,disableClusteringAtZoom:16,
+      iconCreateFunction:zoneClusterIcon
+    });
     zoneOverlay = L.layerGroup([zoneShapes,zoneParking]);
     if(zonesEnabled) zoneOverlay.addTo(map);
+
+    // Samostatná vrstva bodů z aktivní záložky. Lze ji vypnout a nechat čistou mapu se zónami.
+    cluster = L.layerGroup();
+    if(pointsEnabled) cluster.addTo(map);
 
     // Přepínač podkladových vrstev a turistické dopravní vrstvy vpravo nahoře
     layers = L.control.layers(
       {'🛰️ Satelit': satGroup, '🗺️ Mapa (OSM)': street},        // pojmenované podklady
-      {'🚗 Zóny a omezení':zoneOverlay},
+      {'🚗 Zóny a omezení':zoneOverlay, '📍 Místa ze záložek':cluster},
       {position:'topright',collapsed:window.matchMedia('(max-width:700px)').matches}
     ).addTo(map);                                                // přidej na mapu
 
     satGroup.addTo(map);                                         // satelit jako výchozí (chtěná fotomapa)
 
-    // Do této lehké vrstvy se vkládají jen shluky a body aktuálně viditelného výřezu.
-    cluster = L.layerGroup().addTo(map);
     map.on('moveend zoomend', scheduleVisibleRender);
 
     map.on('overlayadd',async event=>{
+      if(event.layer === cluster){
+        pointsEnabled=true; safeSet(POINTS_KEY,true); renderVisibleMarkers();
+        return;
+      }
       if(event.layer !== zoneOverlay) return;
       zonesEnabled = true; safeSet(ZONES_KEY,true); updateZoneLegend();
       if(zonesAvailable && !ZONES.length && bakedData && bakedData.compressed === 'gzip-tabs-base64-v1'){
@@ -1691,6 +1717,11 @@
       if(!zonesAvailable) toast('Zóny se zobrazí po příští aktualizaci dat na GitHubu');
     });
     map.on('overlayremove',event=>{
+      if(event.layer === cluster){
+        pointsEnabled=false; safeSet(POINTS_KEY,false); cluster.clearLayers();
+        for(const id in markerById) delete markerById[id];
+        return;
+      }
       if(event.layer !== zoneOverlay) return;
       zonesEnabled = false; safeSet(ZONES_KEY,false); updateZoneLegend();
     });
@@ -1890,23 +1921,71 @@
     return m;
   }
 
+  function visibleMarkerOrigins(){
+    const origins=[];
+    const visit=layer=>{
+      if(layer && typeof layer.getLatLng === 'function') origins.push(layer.getLatLng());
+      else if(layer && typeof layer.eachLayer === 'function') layer.eachLayer(visit);
+    };
+    cluster.eachLayer(visit);
+    // Pro animaci stačí rovnoměrný vzorek; výpočet tak zůstane lehký i ve městě.
+    if(origins.length<=500) return origins;
+    const sampled=[], step=origins.length/500;
+    for(let i=0;i<500;i++) sampled.push(origins[Math.floor(i*step)]);
+    return sampled;
+  }
+
+  function animateClusterChange(markers,origins,oldZoom,newZoom){
+    if(oldZoom==null || oldZoom===newZoom || !markers.length || markers.length>900) return;
+    if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const originPoints=origins.map(latlng=>map.latLngToContainerPoint(latlng));
+    const zoomingIn=newZoom>oldZoom;
+    requestAnimationFrame(()=>{
+      for(const marker of markers){
+        const el=marker.getElement();
+        if(!el) continue;
+        const visual=el.classList.contains('sc-cluster') ? el.querySelector('span') : el.querySelector('.mkwrap');
+        if(!visual || typeof visual.animate!=='function') continue;
+        const target=map.latLngToContainerPoint(marker.getLatLng());
+        let nearest=null, best=Infinity;
+        for(const point of originPoints){
+          const dx=point.x-target.x, dy=point.y-target.y, d=dx*dx+dy*dy;
+          if(d<best){ best=d; nearest=point; }
+        }
+        const dx=nearest ? Math.max(-650,Math.min(650,nearest.x-target.x)) : 0;
+        const dy=nearest ? Math.max(-650,Math.min(650,nearest.y-target.y)) : 0;
+        visual.animate([
+          {transform:'translate('+dx+'px,'+dy+'px) scale('+(zoomingIn?'.58':'1.18')+')',opacity:.22},
+          {transform:'translate(0,0) scale(1)',opacity:1}
+        ],{duration:330,easing:'cubic-bezier(.2,.75,.25,1)',fill:'both'});
+      }
+    });
+  }
+
   function renderVisibleMarkers(){
     if(!map || !cluster) return;
+    if(!pointsEnabled){
+      cluster.clearLayers();
+      for(const id in markerById) delete markerById[id];
+      return;
+    }
+    const oldZoom=lastRenderedZoom;
+    const origins=visibleMarkerOrigins();
     cluster.clearLayers();
     for(const id in markerById) delete markerById[id];
     if(!spatialSites.length) return;
     const bounds = map.getBounds();
     const bbox = [bounds.getWest(),bounds.getSouth(),bounds.getEast(),bounds.getNorth()];
     const markers = [];
+    const zoom = Math.max(0,Math.min(19,Math.floor(map.getZoom())));
     if(spatialIndex){
-      const zoom = Math.max(0,Math.min(19,Math.floor(map.getZoom())));
       for(const feature of spatialIndex.getClusters(bbox,zoom)){
         const lon=feature.geometry.coordinates[0], lat=feature.geometry.coordinates[1], props=feature.properties||{};
         if(props.cluster){
           const m=L.marker([lat,lon],{icon:clusterCountIcon(props.point_count),keyboard:false});
           m.on('click',()=>{
             const next=Math.min(map.getMaxZoom(),spatialIndex.getClusterExpansionZoom(props.cluster_id));
-            map.setView([lat,lon],next,{animate:true});
+            map.flyTo([lat,lon],next,{duration:.45});
           });
           markers.push(m);
         }else{
@@ -1921,7 +2000,9 @@
         if(markers.length>=2000) break;
       }
     }
-    cluster.addLayer(L.layerGroup(markers));
+    for(const marker of markers) cluster.addLayer(marker);
+    lastRenderedZoom=zoom;
+    animateClusterChange(markers,origins,oldZoom,zoom);
   }
 
   function scheduleVisibleRender(){
@@ -2118,18 +2199,32 @@
     const q = encodeURIComponent(site.name+' '+(site.city||site.region||'')+' '+countryCfg().search); // obecný dotaz
     return 'https://www.google.com/search?q='+q;               // odkaz na Google
   }
+  function mapNameCore(value){
+    return String(value||'').replace(/^[^\p{L}\p{N}]+/u,'').trim().toLocaleLowerCase('cs-CZ');
+  }
+  function siteHasRealName(site){
+    const name=mapNameCore(site.name);
+    if(!name || name==='místo' || name==='kemp bez názvu') return false;
+    // U nepojmenovaných POI je jako název dosazen popisek kategorie. Ikona se může
+    // mezi verzemi lišit, proto porovnáváme text bez úvodního symbolu.
+    return !isPoi() || name!==mapNameCore(catLabel(site.cat));
+  }
   function placeMapsTarget(site){
     const editedAddress = USER[site.id] && USER[site.id].addr;  // ručně opravená adresa má přednost
-    const location = editedAddress || site.addr || site.city || '';
-    const parts = [site.name,location]
+    const address = editedAddress || site.addr || '';
+    const location = address || site.city || '';
+    const parts = [site.name,location,site.region,countryCfg().search]
       .filter(Boolean)
       .filter((value,index,array)=>array.findIndex(item=>item.toLowerCase()===value.toLowerCase())===index);
     const lat = Number(site.lat).toFixed(6), lon = Number(site.lon).toFixed(6);
-    return {query:encodeURIComponent(parts.join(', ')),lat,lon};
+    // Jen skutečně nepojmenované body používají přesný pin. Pojmenovaná místa se
+    // dál hledají názvem poblíž souřadnic, i když v OSM nemají vyplněnou adresu.
+    return {query:encodeURIComponent(parts.join(', ')),lat,lon,exact:!siteHasRealName(site)};
   }
-  // Google Maps – hledání názvu v bezprostředním okolí přesných souřadnic objektu
+  // Google Maps – konkrétní místo dle názvu a adresy; u obecných názvů přesný bod.
   function placeMapsUrl(site){
     const target = placeMapsTarget(site);
+    if(target.exact) return mapsUrl(site);
     return 'https://www.google.com/maps/search/'+target.query+'/@'+target.lat+','+target.lon+',18z';
   }
   // Google Maps – přesný bod pro navigaci
@@ -2139,8 +2234,15 @@
   }
   // Google Maps – trasa k cíli
   function directionsUrl(site){
-    const target = placeMapsTarget(site);
-    return 'https://www.google.com/maps/dir//'+target.query+'/@'+target.lat+','+target.lon+',18z'; // podnik hledaný kolem souřadnic
+    const target=placeMapsTarget(site);
+    if(!target.exact) return 'https://www.google.com/maps/dir//'+target.query+'/@'+target.lat+','+target.lon+',18z';
+    const coordinates=Number(site.lat)+','+Number(site.lon);
+    return 'https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(coordinates);
+  }
+
+  function placeMapsActionLabel(site,kind){
+    if(placeMapsTarget(site).exact) return 'Zobrazit přesný bod v Google Maps';
+    return kind==='camp' ? 'Vyhledat podnik v Google Maps' : 'Vyhledat místo v Google Maps';
   }
   // Google Maps – vyhledání zadané ADRESY (textově, ne podle souřadnic)
   function addrMapsUrl(addr){
@@ -2160,8 +2262,8 @@
     const u = USER[id] || {};                                  // moje editace
     const nameLink = document.getElementById('dname');        // klikací název v hlavičce
     nameLink.textContent = site.name;
-    nameLink.href = placeMapsUrl(site);                        // název hledaný v okolí přesných souřadnic
-    nameLink.setAttribute('aria-label',site.name+' – vyhledat podnik v Google Maps');
+    nameLink.href = placeMapsUrl(site);
+    nameLink.setAttribute('aria-label',site.name+' – '+placeMapsActionLabel(site,isPoi()?'poi':'camp').toLowerCase());
 
     if(isPoi()){ openPoiDetail(id, site, u); return; }         // POI záložka má vlastní detail
 
@@ -2231,7 +2333,7 @@
             <span class="ic">🏨</span>Hledat na Booking.com
           </a>
           <a class="lnk" target="_blank" rel="noopener" href="${placeMapsUrl(site)}">
-            <span class="ic">📍</span>Vyhledat podnik v Google Maps
+            <span class="ic">📍</span>${placeMapsActionLabel(site,'camp')}
           </a>
           <a class="lnk" target="_blank" rel="noopener" href="${directionsUrl(site)}">
             <span class="ic">🧭</span>Navigovat sem
@@ -2333,7 +2435,7 @@
           ${wiki ? `<a class="lnk" target="_blank" rel="noopener" href="${wiki}"><span class="ic">📖</span>Wikipedie</a>` : ''}
           ${activeTab==='lodging' ? `<a class="lnk" target="_blank" rel="noopener" href="${bookingUrl(site)}"><span class="ic">🏨</span>Hledat na Booking.com</a>` : ''}
           <a class="lnk" target="_blank" rel="noopener" href="${placeMapsUrl(site)}">
-            <span class="ic">📍</span>Vyhledat místo v Google Maps
+            <span class="ic">📍</span>${placeMapsActionLabel(site,'poi')}
           </a>
           <a class="lnk" target="_blank" rel="noopener" href="${directionsUrl(site)}">
             <span class="ic">🧭</span>Navigovat sem
