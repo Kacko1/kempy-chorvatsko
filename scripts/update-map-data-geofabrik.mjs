@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { gzipSync, gunzipSync } from 'node:zlib';
 
 const REPOSITORY = 'https://github.com/Kacko1/kempy-chorvatsko';
 const OUTPUT_DIR = path.resolve('.');
@@ -92,6 +93,35 @@ const TABS = {
     ]
   }
 };
+
+// Samostatná překryvná vrstva pro řidiče. Filtrujeme jen výslovně označené
+// zóny a zpoplatněné úseky, ne celou silniční síť.
+const ZONE_SELECTORS = [
+  'boundary=low_emission_zone',
+  'boundary=limited_traffic_zone',
+  'type=toll',
+  'toll=yes',
+  'toll:motor_vehicle=yes',
+  'toll:motorcar=yes'
+];
+
+const ZONE_LABELS = {
+  low_emission:'Nízkoemisní zóna',
+  limited_traffic:'Zóna s omezeným vjezdem',
+  toll:'Zpoplatněný úsek nebo oblast',
+  paid_parking:'Placené parkoviště'
+};
+
+const ZONE_RULE_KEYS = [
+  'access','access:conditional','motor_vehicle','motor_vehicle:conditional',
+  'motorcar','motorcar:conditional','motorhome','motorhome:conditional',
+  'caravan','caravan:conditional','hgv','hgv:conditional',
+  'fee','fee:amount','fee:conditional','charge','charge:conditional',
+  'toll','toll:motor_vehicle','toll:motorcar','opening_hours','maxstay',
+  'capacity','capacity:motorhome','capacity:caravan','parking','surface',
+  'maxheight','maxwidth','maxweight','zone:traffic','emission_class',
+  'description','note'
+];
 
 const FALLBACK_LABELS = {
   sights:{historic:'🏛 Pamětihodnosti',sacral:'⛪ Sakrální',museum:'🖼️ Muzea a umění',view:'🔭 Vyhlídky',fun:'🎡 Zábava',attraction:'📌 Ostatní'},
@@ -230,7 +260,44 @@ function parseFeature(feature, country){
   if(!['node','way','relation'].includes(type) || numericId == null) return null;
   const center = bboxCenter(feature.geometry);
   if(!center || !insideCountryBounds(country,center.lat,center.lon)) return null;
-  return {id:type + '/' + numericId, type, tags:properties, ...center};
+  return {id:type + '/' + numericId, type, tags:properties, geometry:feature.geometry, ...center};
+}
+
+function paidParkingForOverlay(tags){
+  if(tags.amenity !== 'parking') return false;
+  const paid = tags.fee === 'yes' || !!tags.charge || !!tags['fee:amount'] || !!tags['fee:conditional'] || !!tags['charge:conditional'];
+  if(!paid) return false;
+  return !!(
+    tags.name || tags.operator || tags.maxstay || tags.opening_hours || tags.supervised ||
+    tags.motorhome || tags.caravan || tags['capacity:motorhome'] || tags['capacity:caravan']
+  );
+}
+
+function zoneKind(tags){
+  if(tags.boundary === 'low_emission_zone') return 'low_emission';
+  if(tags.boundary === 'limited_traffic_zone') return 'limited_traffic';
+  if(tags.type === 'toll' || tags.toll === 'yes' || tags['toll:motor_vehicle'] === 'yes' || tags['toll:motorcar'] === 'yes') return 'toll';
+  if(paidParkingForOverlay(tags)) return 'paid_parking';
+  return null;
+}
+
+function zoneFromFeature(item, country){
+  const kind = zoneKind(item.tags);
+  if(!kind) return null;
+  const tags = item.tags;
+  const rules = {};
+  for(const key of ZONE_RULE_KEYS) if(tags[key] != null && tags[key] !== '') rules[key] = tags[key];
+  const geometry = kind === 'paid_parking'
+    ? {type:'Point',coordinates:[item.lon,item.lat]}
+    : item.geometry;
+  if(!geometry || !geometry.type || !geometry.coordinates) return null;
+  return {
+    id:item.id, kind, geometry, lat:item.lat, lon:item.lon,
+    name:tags.name || tags[country.nameTag] || tags['name:en'] || tags.operator || ZONE_LABELS[kind],
+    operator:tags.operator || null,
+    website:tags.website || tags['contact:website'] || null,
+    rules
+  };
 }
 
 function campFromFeature(item, country){
@@ -295,7 +362,8 @@ function mergeFilms(list){
 function filterExpressions(){
   const selectors = [
     'tourism=camp_site','tourism=caravan_site',
-    ...Object.values(TABS).flatMap(tab=>(tab.cats || []).flatMap(category=>category.sel))
+    ...Object.values(TABS).flatMap(tab=>(tab.cats || []).flatMap(category=>category.sel)),
+    ...ZONE_SELECTORS
   ];
   const grouped = new Map();
   for(const selector of selectors){
@@ -387,6 +455,7 @@ async function* readGeoJsonRecords(input){
 
 async function parseGeoJsonSequence(file, country){
   const maps = Object.fromEntries(Object.keys(TABS).map(tabId=>[tabId,new Map()]));
+  const zones = new Map();
   let rawFeatures = 0, skipped = 0;
   const input = createReadStream(file,{encoding:'utf8'});
   for await (const feature of readGeoJsonRecords(input)){
@@ -395,6 +464,8 @@ async function parseGeoJsonSequence(file, country){
     if(!item){ skipped++; continue; }
     const camp = campFromFeature(item,country);
     if(camp) maps.camps.set(camp.id,camp);
+    const zone = zoneFromFeature(item,country);
+    if(zone) zones.set(zone.id,zone);
     for(const [tabId,tab] of Object.entries(TABS)){
       if(tabId === 'camps') continue;
       const category = classify(item.tags,tab.cats);
@@ -420,14 +491,28 @@ async function parseGeoJsonSequence(file, country){
     bundle[tabId] = {fetchedAt,data};
     console.log('  ' + TABS[tabId].label + ': ' + data.length + ' objektů');
   }
+  bundle.zones = {fetchedAt,data:[...zones.values()]};
+  const zoneCounts = Object.fromEntries(Object.keys(ZONE_LABELS).map(kind=>[kind,0]));
+  for(const zone of zones.values()) zoneCounts[zone.kind]++;
+  console.log('  Zóny a omezení: ' + zones.size + ' objektů'
+    + ' (emisní ' + zoneCounts.low_emission
+    + ', omezený vjezd ' + zoneCounts.limited_traffic
+    + ', mýto ' + zoneCounts.toll
+    + ', placené parkování ' + zoneCounts.paid_parking + ')');
   console.log('  zpracováno geometrií: ' + rawFeatures + ', přeskočeno bez platné geometrie: ' + skipped);
   return bundle;
 }
 
-async function compressBundle(bundle){
-  const module = await import('lz-string');
-  const lzString = module.default || module;
-  return JSON.stringify({compressed:true,z:lzString.compressToBase64(JSON.stringify(bundle))});
+function compressBundle(bundle){
+  const source = Buffer.from(JSON.stringify(bundle),'utf8');
+  // Nativní zlib je u velkých zemí řádově rychlejší než původní čistě
+  // JavaScriptový LZ-String. Úroveň 6 dává dobrý poměr rychlosti a velikosti.
+  const compressed = gzipSync(source,{level:6});
+  return {
+    payload:JSON.stringify({compressed:'gzip-base64-v1',z:compressed.toString('base64')}),
+    sourceBytes:source.length,
+    compressedBytes:compressed.length
+  };
 }
 
 async function buildCountry(country){
@@ -448,7 +533,11 @@ async function buildCountry(country){
       '-a','type,id','-i','sparse_file_array,' + locationIndex,'-o',geojsonSeq,filteredPbf
     ]);
     const bundle = await parseGeoJsonSequence(geojsonSeq,country);
-    const payload = await compressBundle(bundle);
+    console.log('  komprimuji výsledný JSON nativním gzipem…');
+    const compressed = compressBundle(bundle);
+    const payload = compressed.payload;
+    console.log('  komprese hotova: ' + Math.round(compressed.sourceBytes/1024/1024)
+      + ' MB → ' + Math.round(compressed.compressedBytes/1024/1024) + ' MB gzip');
     const output = path.join(TEMP_DIR,country.file);
     await writeFile(output,payload,'utf8');
     console.log('  připraven ' + country.file + ' (' + Math.round(Buffer.byteLength(payload)/1024) + ' kB)');
@@ -465,6 +554,10 @@ async function runChecks(){
     'polsko_data.json','rakousko_data.json','slovensko_data.json','slovinsko_data.json','svycarsko_data.json'
   ]);
   assert.ok(filterExpressions().includes('nwr/tourism=camp_site,caravan_site,museum,gallery,artwork,aquarium,viewpoint,theme_park,zoo,attraction,hotel,apartment,guest_house,hostel,motel,chalet'));
+  assert.ok(filterExpressions().some(expression=>
+    expression.startsWith('nwr/boundary=') &&
+    expression.includes('low_emission_zone') && expression.includes('limited_traffic_zone')));
+  assert.ok(filterExpressions().includes('nwr/type=toll'));
   assert.deepEqual(bboxCenter({type:'Point',coordinates:[14.25,50.1]}),{lat:50.1,lon:14.25});
   assert.deepEqual(bboxCenter({type:'Polygon',coordinates:[[[10,40],[14,40],[14,44],[10,44],[10,40]]]}),{lat:42,lon:12});
   assert.equal(parseFeature({
@@ -478,6 +571,23 @@ async function runChecks(){
   assert.equal(sample.id,'way/123');
   assert.deepEqual({lat:sample.lat,lon:sample.lon},{lat:50,lon:15});
   assert.equal(campFromFeature(sample,COUNTRIES[0]).name,'Test');
+  const zone = zoneFromFeature(parseFeature({
+    type:'Feature',properties:{'@type':'relation','@id':456,boundary:'low_emission_zone',name:'Testovací zóna','motor_vehicle:conditional':'no @ (Mo-Fr 08:00-18:00)'},
+    geometry:{type:'Polygon',coordinates:[[[14,49],[16,49],[16,51],[14,51],[14,49]]]}
+  },COUNTRIES[0]),COUNTRIES[0]);
+  assert.equal(zone.kind,'low_emission');
+  assert.equal(zone.geometry.type,'Polygon');
+  assert.equal(zone.rules['motor_vehicle:conditional'],'no @ (Mo-Fr 08:00-18:00)');
+  assert.equal(paidParkingForOverlay({amenity:'parking',fee:'yes'}),false);
+  assert.equal(paidParkingForOverlay({amenity:'parking',fee:'yes',maxstay:'2 hours'}),true);
+  const compressionSample = {camps:{fetchedAt:1,data:[{id:'node/1',lat:50.1,lon:14.2,name:'Test'}]}};
+  const compressedSample = compressBundle(compressionSample);
+  const compressedWrapper = JSON.parse(compressedSample.payload);
+  assert.equal(compressedWrapper.compressed,'gzip-base64-v1');
+  assert.deepEqual(
+    JSON.parse(gunzipSync(Buffer.from(compressedWrapper.z,'base64')).toString('utf8')),
+    compressionSample
+  );
   const rawDescription = 'první řádek\ndruhý řádek';
   const rawRecord = '{"type":"Feature","geometry":{"type":"Point","coordinates":[14.2,50.1]},"properties":{"@type":"node","@id":7,"description":"' + rawDescription + '"}}';
   const secondRecord = JSON.stringify({type:'Feature',geometry:{type:'Point',coordinates:[14.3,50.2]},properties:{'@type':'node','@id':8}});
