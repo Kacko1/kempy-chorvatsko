@@ -1796,15 +1796,19 @@
     const q = encodeURIComponent(site.name+' '+(site.city||site.region||'')+' '+countryCfg().search); // obecný dotaz
     return 'https://www.google.com/search?q='+q;               // odkaz na Google
   }
-  // Google Maps – hledání názvu v bezprostředním okolí přesných souřadnic objektu
-  function placeMapsUrl(site){
+  function placeMapsTarget(site){
     const editedAddress = USER[site.id] && USER[site.id].addr;  // ručně opravená adresa má přednost
     const location = editedAddress || site.addr || site.city || '';
     const parts = [site.name,location]
       .filter(Boolean)
       .filter((value,index,array)=>array.findIndex(item=>item.toLowerCase()===value.toLowerCase())===index);
     const lat = Number(site.lat).toFixed(6), lon = Number(site.lon).toFixed(6);
-    return 'https://www.google.com/maps/search/'+encodeURIComponent(parts.join(', '))+'/@'+lat+','+lon+',18z';
+    return {query:encodeURIComponent(parts.join(', ')),lat,lon};
+  }
+  // Google Maps – hledání názvu v bezprostředním okolí přesných souřadnic objektu
+  function placeMapsUrl(site){
+    const target = placeMapsTarget(site);
+    return 'https://www.google.com/maps/search/'+target.query+'/@'+target.lat+','+target.lon+',18z';
   }
   // Google Maps – přesný bod pro navigaci
   function mapsUrl(site){
@@ -1813,7 +1817,8 @@
   }
   // Google Maps – trasa k cíli
   function directionsUrl(site){
-    return 'https://www.google.com/maps/dir/?api=1&destination='+site.lat+','+site.lon; // navigace k bodu
+    const target = placeMapsTarget(site);
+    return 'https://www.google.com/maps/dir//'+target.query+'/@'+target.lat+','+target.lon+',18z'; // podnik hledaný kolem souřadnic
   }
   // Google Maps – vyhledání zadané ADRESY (textově, ne podle souřadnic)
   function addrMapsUrl(addr){
