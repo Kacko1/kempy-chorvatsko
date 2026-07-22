@@ -397,25 +397,26 @@
       <label id="countryWrap">Země
         <select id="country">
           <option value="cz">Česko</option>
-          <option value="at">Rakousko</option>
-          <option value="si">Slovinsko</option>
           <option value="hr">Chorvatsko</option>
-          <option value="pl">Polsko</option>
-          <option value="sk">Slovensko</option>
+          <option value="it">Itálie</option>
           <option value="de">Německo</option>
+          <option value="pl">Polsko</option>
+          <option value="at">Rakousko</option>
+          <option value="sk">Slovensko</option>
+          <option value="si">Slovinsko</option>
+          <option value="ch">Švýcarsko</option>
         </select>
       </label>
       <!-- Stavový text o datech (naplní JS) -->
       <div id="status">Načítám…</div>
       <!-- Přepínač zdroje dat: offline (uložený soubor) vs online (stahování) -->
-      <div id="srcSwitch" class="seg">
+      <div id="srcSwitch" class="seg" hidden>
         <button class="segbtn" data-src="baked">📦 Offline</button>
         <button class="segbtn" data-src="live">🌐 Online</button>
       </div>
       <!-- Vygenerování datového souboru (pro offline režim) -->
-      <button id="exportBtn" class="btn" title="Stáhnout všechny záložky vybrané země do JSON souboru">⬇️ Data</button>
       <!-- Tlačítko pro znovunačtení dat z internetu -->
-      <button id="refresh" class="btn" title="Aktualizovat data aktivní záložky">↻ Aktualizovat</button>
+      <button id="refresh" class="btn" hidden title="Aktualizovat data aktivní záložky">↻ Aktualizovat</button>
     </div>
 
     <!-- Lišta záložek (panelů) — vodorovně rolovatelná na úzku -->
@@ -549,12 +550,14 @@
   // Země podporované aplikací. Název souboru je zároveň název JSONu pro offline režim.
   const COUNTRIES = {
     cz:{label:'Česko',      iso:'CZ', slug:'cesko',      search:'Česko',      center:[49.82,15.47], zoom:7, nameTag:'name:cs'},
-    at:{label:'Rakousko',   iso:'AT', slug:'rakousko',   search:'Österreich', center:[47.58,14.13], zoom:7, nameTag:'name:de'},
-    si:{label:'Slovinsko',  iso:'SI', slug:'slovinsko',  search:'Slovenija',  center:[46.15,14.99], zoom:8, nameTag:'name:sl'},
     hr:{label:'Chorvatsko', iso:'HR', slug:'chorvatsko', search:'Hrvatska',   center:[44.30,15.60], zoom:7, nameTag:'name:hr'},
+    it:{label:'Itálie',     iso:'IT', slug:'italie',     search:'Italia',     center:[42.50,12.50], zoom:6, nameTag:'name:it'},
+    de:{label:'Německo',    iso:'DE', slug:'nemecko',    search:'Deutschland',center:[51.17,10.45], zoom:6, nameTag:'name:de'},
     pl:{label:'Polsko',     iso:'PL', slug:'polsko',     search:'Polska',     center:[52.12,19.40], zoom:6, nameTag:'name:pl'},
+    at:{label:'Rakousko',   iso:'AT', slug:'rakousko',   search:'Österreich', center:[47.58,14.13], zoom:7, nameTag:'name:de'},
     sk:{label:'Slovensko',  iso:'SK', slug:'slovensko',  search:'Slovensko',  center:[48.70,19.55], zoom:8, nameTag:'name:sk'},
-    de:{label:'Německo',    iso:'DE', slug:'nemecko',    search:'Deutschland',center:[51.17,10.45], zoom:6, nameTag:'name:de'}
+    si:{label:'Slovinsko',  iso:'SI', slug:'slovinsko',  search:'Slovenija',  center:[46.15,14.99], zoom:8, nameTag:'name:sl'},
+    ch:{label:'Švýcarsko',  iso:'CH', slug:'svycarsko',  search:'Schweiz',     center:[46.80,8.23], zoom:8, nameTag:'name:de'}
   };
   let activeCountry = 'cz';                 // výchozí země; uložená volba se načte při startu
 
@@ -604,9 +607,25 @@
     const k = sel.slice(0,i), v = sel.slice(i+1);              // klíč a hodnota
     return `nwr["${k}"="${v}"]${named?'["name"]':''}(area.country);`; // část dotazu (příp. jen s názvem)
   }
+  // Sloučí hodnoty stejného klíče do regexu, aby velké země nepřekročily limity Overpassu.
+  function selsToOverpass(selectors){
+    const grouped = new Map();
+    for(let sel of selectors){
+      let named = false;
+      if(sel.endsWith('#named')){ named = true; sel = sel.slice(0,-6); }
+      const i = sel.indexOf('='), k = sel.slice(0,i), v = sel.slice(i+1);
+      const id = k+'|'+named;
+      if(!grouped.has(id)) grouped.set(id,{k,named,values:[]});
+      grouped.get(id).values.push(v);
+    }
+    return [...grouped.values()].map(g=>{
+      const pattern = g.values.map(v=>v.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|');
+      return `nwr["${g.k}"~"^(${pattern})$"${g.named?'["name"]':''}](area.country);`;
+    }).join('');
+  }
   // Sestaví Overpass dotaz (data nebo počet) z kategorií záložky
   function buildQuery(cats, count){
-    const body = cats.map(c=>c.sel).flat().map(selToOverpass).join(''); // spoj selektory
+    const body = selsToOverpass(cats.map(c=>c.sel).flat()); // spoj selektory
     const tail = count ? 'out count;' : 'out center tags;';    // počet vs. data
     return `[out:json][timeout:120];area["ISO3166-1"="${countryCfg().iso}"]->.country;(${body});${tail}`;
   }
@@ -1229,7 +1248,7 @@
       }else{
         for(const id in DATA) delete DATA[id]; ALL=[];
         afterLoad(null);
-        toast('Chybí '+bakedFilename()+' — vytvoř ho tlačítkem Data');
+        toast('Chybí '+bakedFilename()+' — spusť aktualizaci dat na GitHubu');
       }
     }else{                                                    // přepínám na online
       for(const id in DATA) delete DATA[id];                  // zahoď data z paměti
@@ -1241,7 +1260,7 @@
   function updateSourceUI(){
     document.querySelectorAll('.segbtn').forEach(b=>          // zvýrazni vybraný segment
       b.classList.toggle('active', b.getAttribute('data-src')===sourceMode));
-    document.getElementById('refresh').style.display = (sourceMode==='baked') ? 'none' : ''; // ↻ jen online
+    document.getElementById('refresh').hidden = (sourceMode==='baked'); // ↻ jen online
   }
 
   // Aktualizuje popisky a polohu mapy podle vybrané země.
@@ -1249,7 +1268,6 @@
     const cfg = countryCfg();
     document.getElementById('country').value = activeCountry;
     document.getElementById('region').options[0].textContent = 'Celá země — '+cfg.label;
-    document.getElementById('exportBtn').title = 'Stáhnout '+bakedFilename();
     if(moveMap && map) map.setView(cfg.center, cfg.zoom);
   }
 
@@ -1276,7 +1294,7 @@
         applyBaked(); ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]);
       }else{
         afterLoad(null);
-        toast('Pro '+countryCfg().label+' chybí '+bakedFilename()+' — vytvoř ho tlačítkem Data');
+        toast('Pro '+countryCfg().label+' chybí '+bakedFilename()+' — spusť aktualizaci dat na GitHubu');
       }
     }else{
       loadData();
@@ -2400,7 +2418,6 @@
     // Přepínač zdroje dat (Offline / Online) a export
     document.querySelectorAll('.segbtn').forEach(b=>
       b.addEventListener('click', ()=> setSource(b.getAttribute('data-src'))));
-    document.getElementById('exportBtn').addEventListener('click', exportData);
 
     // Zavření detailu (křížek)
     document.getElementById('dclose').addEventListener('click', closeDetail);
@@ -2429,8 +2446,8 @@
   // Start: zapamatovaná země a zdroj. Při první návštěvě je výchozí Česko + Offline.
   (async function boot(){
     const savedCountry = safeGet(COUNTRY_KEY, 'cz');           // poslední země, jinak Česko
-    const savedMode = safeGet(SRC_MODE_KEY, 'baked');          // poslední režim, jinak Offline
-    sourceMode = savedMode==='live' ? 'live' : 'baked';
+    sourceMode = 'baked';                                     // aplikace používá pouze přibalená offline data
+    safeSet(SRC_MODE_KEY, 'baked');
     updateSourceUI();
     await switchCountry(COUNTRIES[savedCountry] ? savedCountry : 'cz', true);
   })();
