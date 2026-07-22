@@ -260,6 +260,26 @@
     .marker-cluster{background:rgba(45,212,191,.25)}         /* vnější kruh shluku */
     .marker-cluster div{background:rgba(45,212,191,.85);color:#04231f;font-weight:700} /* vnitřní kruh s číslem */
 
+    /* Překryvná dopravní vrstva: plochy zón a značky placeného parkování */
+    .zone-swatch{width:13px;height:10px;border-radius:3px;border:2px solid currentColor;opacity:.9}
+    .zone-swatch.low{color:#f59e0b;background:rgba(245,158,11,.25)}
+    .zone-swatch.limited{color:#ef4444;background:rgba(239,68,68,.25)}
+    .zone-swatch.toll{color:#a855f7;background:rgba(168,85,247,.25)}
+    .zone-swatch.parking{color:#2563eb;background:rgba(37,99,235,.25)}
+    #legendZones{border-top:1px solid var(--line);margin-top:7px;padding-top:7px}
+    #zoneLegendStatus{max-width:230px;line-height:1.35;margin-top:5px;color:var(--muted)}
+    .zone-parking-icon{
+      width:24px;height:24px;border-radius:7px;background:#2563eb;color:#fff;border:2px solid #fff;
+      display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;
+      box-shadow:0 1px 5px rgba(0,0,0,.55)
+    }
+    .zone-popup{min-width:220px;line-height:1.35}
+    .zone-popup h3{font-size:14px;margin:0 0 5px}
+    .zone-popup .zone-type{font-size:11px;font-weight:700;margin-bottom:8px}
+    .zone-popup .zone-rule{font-size:11.5px;margin:3px 0}
+    .zone-popup .zone-note{font-size:10.5px;color:#64748b;margin-top:8px}
+    .zone-popup a{color:#0369a1}
+
     /* ===== Detailní panel (překryv nad sidebarem / obrazovkou) ===== */
     #detail{
       position:absolute;top:0;right:0;height:100%;width:380px;  /* panel vpravo přes celou výšku */
@@ -512,6 +532,14 @@
           </div>
           <!-- Legenda POI záložek (generuje se dynamicky) -->
           <div id="legendPoi" style="display:none"></div>
+          <!-- Zobrazí se jen při zapnuté překryvné vrstvě zón -->
+          <div id="legendZones" hidden>
+            <div class="lg"><span class="zone-swatch low"></span> Nízkoemisní zóna</div>
+            <div class="lg"><span class="zone-swatch limited"></span> Omezený vjezd / ZTL</div>
+            <div class="lg"><span class="zone-swatch toll"></span> Zpoplatněná oblast nebo úsek</div>
+            <div class="lg"><span class="zone-swatch parking"></span> Placené parkoviště</div>
+            <div id="zoneLegendStatus"></div>
+          </div>
         </div>
       </div>
 
@@ -569,6 +597,7 @@
   // Klíče pro ukládání do localStorage (společné pro celou aplikaci)
   const COUNTRY_KEY = 'travel_map_country_v1';
   const SRC_MODE_KEY = 'travel_map_src_mode_v1'; // zapamatovaný zdroj dat ('baked' / 'live')
+  const ZONES_KEY = 'travel_map_zones_visible_v1'; // zapnutá překryvná vrstva zón
   function countryCfg(){ return COUNTRIES[activeCountry]; }
   function userKey(){ return 'travel_map_user_'+activeCountry+'_v1'; }
   function cacheKey(tabId){
@@ -779,12 +808,17 @@
   let FILTERED = [];            // aktuálně vyfiltrovaná data
   let USER = loadUser();        // moje uložené editace podle ID
   let map, cluster, layers;     // mapa, vrstva shluků, podkladové vrstvy
+  let zoneOverlay, zoneShapes, zoneParking; // přepínatelná vrstva zón, plochy a parkování
+  let ZONES = [];               // zóny aktuální země načtené z přibaleného JSONu
+  let zonesAvailable = false;   // rozliší starší JSON bez vrstvy od země s nulovým počtem zón
+  let zonesEnabled = !!safeGet(ZONES_KEY, false);
   let nominatimPending = false; // ochrana veřejného geokodéru před souběžnými požadavky
   let lastNominatimAt = 0;      // Nominatim dovoluje nejvýše jeden požadavek za sekundu
   const markerById = {};        // rychlý přístup ke značce podle ID
   let activeId = null;          // ID právě otevřeného místa v detailu
   const tabFetchedAt = {};      // čas stažení dat pro každou záložku
   let bakedData = null;         // data načtená z přibaleného souboru (nebo null)
+  let bakedLoadError = null;    // případná chyba souboru nebo nepodporované komprese
   let sourceMode = 'baked';     // výchozí je offline; 'live' = stahování z Overpassu
   let exportController = null;  // AbortController pro rušení exportu
   let exportCancelled = false;  // příznak zrušení exportu
@@ -1122,29 +1156,62 @@
      ULOŽENÝ DATOVÝ SOUBOR VYBRANÉ ZEMĚ (např. cesko_data.json vedle HTML)
      ========================================================================= */
 
+  // Převede velký Base64 řetězec na Blob po menších blocích. Díky tomu se při
+  // rozbalování Německa nevytváří ještě jedna obří dočasná binární kopie.
+  function base64ToBlob(base64){
+    const chunks = [];
+    const sliceSize = 4 * 1024 * 1024;                         // násobek 4 kvůli Base64
+    for(let offset=0; offset<base64.length; offset+=sliceSize){
+      const binary = atob(base64.slice(offset,offset+sliceSize));
+      const bytes = new Uint8Array(binary.length);
+      for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
+      chunks.push(bytes);
+    }
+    return new Blob(chunks,{type:'application/gzip'});
+  }
+
+  // Nové soubory používají rychlý nativní gzip. Funkce je asynchronní, takže
+  // prohlížeč může rozbalovat stream a nezamrzne na pomalém LZ algoritmu.
+  async function decompressGzipBundle(base64){
+    if(typeof DecompressionStream === 'undefined'){
+      throw new Error('Tento prohlížeč nepodporuje rozbalování gzip dat. Aktualizuj jej na novější verzi.');
+    }
+    const stream = base64ToBlob(base64).stream().pipeThrough(new DecompressionStream('gzip'));
+    return JSON.parse(await new Response(stream).text());
+  }
+
   // Při startu zkus načíst přibalený datový soubor (jen ho připraví, nenaplní hned data)
   async function loadBaked(){
     bakedData = null;
+    bakedLoadError = null;
     try{
       const r = await fetch(bakedFilename(), {cache:'no-cache'}); // soubor vybrané země vedle appky
       if(!r.ok) return false;                                  // soubor pro zemi není
       let obj = await r.json();                                // načti JSON
-      if(obj && obj.compressed && typeof LZString !== 'undefined'){ // komprimovaný?
-        obj = JSON.parse(LZString.decompressFromBase64(obj.z));// rozbal
+      if(obj && obj.compressed === 'gzip-base64-v1'){
+        document.getElementById('status').textContent = 'Rozbaluji data – '+countryCfg().label+'…';
+        obj = await decompressGzipBundle(obj.z);               // nový rychlý formát
+      }else if(obj && obj.compressed === true && typeof LZString !== 'undefined'){
+        obj = JSON.parse(LZString.decompressFromBase64(obj.z));// starší JSONy zůstávají podporované
+      }else if(obj && obj.compressed){
+        throw new Error('Nepodporovaný formát komprimovaných dat');
       }
       if(!obj || typeof obj !== 'object') return false;        // nevalidní
       bakedData = obj;                                         // zapamatuj (naplní se až v baked režimu)
       return true;                                             // máme uložená data
-    }catch(e){ return false; }                                 // chyba → živě
+    }catch(e){ bakedLoadError = e; console.error(e); return false; }
   }
 
   // Naplní data všech záložek z přibaleného souboru (volá se při vstupu do baked režimu)
   function applyBaked(){
     for(const id in DATA) delete DATA[id];
     for(const id in tabFetchedAt) delete tabFetchedAt[id];
-    for(const id in bakedData){
+    for(const id in TABS){
       if(bakedData[id] && bakedData[id].data){ DATA[id] = bakedData[id].data; tabFetchedAt[id] = bakedData[id].fetchedAt; }
     }
+    zonesAvailable = !!(bakedData.zones && Array.isArray(bakedData.zones.data));
+    ZONES = zonesAvailable ? bakedData.zones.data : [];
+    renderZoneOverlay();
   }
 
   // Stáhne a zpracuje data JEDNÉ záložky (pro export; bez zásahu do UI datasetu)
@@ -1288,6 +1355,8 @@
     for(const id in DATA) delete DATA[id];
     for(const id in tabFetchedAt) delete tabFetchedAt[id];
     ALL = []; FILTERED = []; bakedData = null; activeId = null;
+    ZONES = []; zonesAvailable = false;
+    renderZoneOverlay();
     USER = loadUser();
     closeDetail();
     document.getElementById('search').value = '';
@@ -1301,7 +1370,9 @@
         applyBaked(); ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]);
       }else{
         afterLoad(null);
-        toast('Pro '+countryCfg().label+' chybí '+bakedFilename()+' — spusť aktualizaci dat na GitHubu');
+        toast(bakedLoadError
+          ? ('Data pro '+countryCfg().label+' nelze načíst: '+bakedLoadError.message)
+          : ('Pro '+countryCfg().label+' chybí '+bakedFilename()+' — spusť aktualizaci dat na GitHubu'));
       }
     }else{
       loadData();
@@ -1421,10 +1492,117 @@
      INICIALIZACE MAPY
      ========================================================================= */
 
+  const ZONE_TYPES = {
+    low_emission:{label:'Nízkoemisní zóna',color:'#f59e0b',fillOpacity:.18},
+    limited_traffic:{label:'Zóna s omezeným vjezdem / ZTL',color:'#ef4444',fillOpacity:.18},
+    toll:{label:'Zpoplatněná oblast nebo úsek',color:'#a855f7',fillOpacity:.15},
+    paid_parking:{label:'Placené parkoviště',color:'#2563eb',fillOpacity:.15}
+  };
+
+  const ZONE_RULE_LABELS = {
+    access:'Přístup', 'access:conditional':'Přístup v určité době',
+    motor_vehicle:'Motorová vozidla', 'motor_vehicle:conditional':'Motorová vozidla – podmínka',
+    motorcar:'Osobní auta', 'motorcar:conditional':'Osobní auta – podmínka',
+    motorhome:'Obytná auta', 'motorhome:conditional':'Obytná auta – podmínka',
+    caravan:'Karavany', 'caravan:conditional':'Karavany – podmínka',
+    hgv:'Nákladní vozidla', 'hgv:conditional':'Nákladní vozidla – podmínka',
+    fee:'Placené', 'fee:amount':'Výše poplatku', 'fee:conditional':'Poplatek – podmínka',
+    charge:'Poplatek', 'charge:conditional':'Poplatek – podmínka',
+    toll:'Mýto', 'toll:motor_vehicle':'Mýto pro motorová vozidla', 'toll:motorcar':'Mýto pro osobní auta',
+    opening_hours:'Doba platnosti', maxstay:'Maximální stání',
+    capacity:'Počet míst', 'capacity:motorhome':'Místa pro obytná auta', 'capacity:caravan':'Místa pro karavany',
+    parking:'Typ parkování', surface:'Povrch',
+    maxheight:'Maximální výška', maxwidth:'Maximální šířka', maxweight:'Maximální hmotnost',
+    'zone:traffic':'Dopravní režim', emission_class:'Emisní třída',
+    description:'Popis', note:'Poznámka'
+  };
+
+  function readableZoneValue(value){
+    const translated = {yes:'ano',no:'ne',permit:'pouze s povolením',customers:'pouze zákazníci',private:'soukromé',destination:'pouze cílová doprava'};
+    return translated[String(value).toLowerCase()] || value;
+  }
+
+  function safeExternalUrl(value){
+    try{
+      const url = new URL(value);
+      return /^https?:$/.test(url.protocol) ? url.href : null;
+    }catch(e){ return null; }
+  }
+
+  function zonePopupHtml(zone){
+    const type = ZONE_TYPES[zone.kind] || ZONE_TYPES.limited_traffic;
+    const rules = zone.rules || {};
+    const rows = Object.keys(ZONE_RULE_LABELS)
+      .filter(key=>rules[key] != null && rules[key] !== '')
+      .map(key=>`<div class="zone-rule"><b>${esc(ZONE_RULE_LABELS[key])}:</b> ${esc(readableZoneValue(rules[key]))}</div>`)
+      .join('');
+    const web = safeExternalUrl(zone.website);
+    const osmId = String(zone.id || '').split('/');
+    const osm = osmId.length===2 && /^(node|way|relation)$/.test(osmId[0]) && /^\d+$/.test(osmId[1])
+      ? `https://www.openstreetmap.org/${osmId[0]}/${osmId[1]}` : null;
+    const mapsQuery = encodeURIComponent((zone.name || type.label)+' '+zone.lat+','+zone.lon);
+    return `<div class="zone-popup">
+      <h3>${esc(zone.name || type.label)}</h3>
+      <div class="zone-type" style="color:${type.color}">${esc(type.label)}</div>
+      ${zone.operator ? `<div class="zone-rule"><b>Provozovatel:</b> ${esc(zone.operator)}</div>` : ''}
+      ${rows || '<div class="zone-rule">Podrobné podmínky nejsou v OpenStreetMap uvedené.</div>'}
+      <div class="zone-note">Pravidla vždy ověř podle dopravního značení a oficiálního zdroje.</div>
+      <div class="zone-rule">${web ? `<a href="${esc(web)}" target="_blank" rel="noopener">Oficiální web ↗</a> · ` : ''}${osm ? `<a href="${osm}" target="_blank" rel="noopener">Záznam v OSM ↗</a> · ` : ''}<a href="https://www.google.com/maps/search/?api=1&query=${mapsQuery}" target="_blank" rel="noopener">Google Maps ↗</a></div>
+    </div>`;
+  }
+
+  function zoneStyle(kind){
+    const type = ZONE_TYPES[kind] || ZONE_TYPES.limited_traffic;
+    return {color:type.color,weight:3,opacity:.9,fillColor:type.color,fillOpacity:type.fillOpacity,dashArray:kind==='toll'?'8 5':null};
+  }
+
+  function updateZoneLegend(){
+    const legend = document.getElementById('legendZones');
+    if(!legend) return;
+    legend.hidden = !zonesEnabled;
+    const status = document.getElementById('zoneLegendStatus');
+    if(!status) return;
+    if(!zonesAvailable){
+      status.textContent = 'Vrstva se doplní po příští aktualizaci JSONů na GitHubu.';
+      return;
+    }
+    if(!ZONES.length){
+      status.textContent = 'Pro tuto zemi nejsou v OSM použitelné záznamy.';
+      return;
+    }
+    const counts = {};
+    ZONES.forEach(zone=> counts[zone.kind] = (counts[zone.kind]||0)+1);
+    status.textContent = ZONES.length+' záznamů v této zemi';
+  }
+
+  function renderZoneOverlay(){
+    if(!zoneShapes || !zoneParking) return;
+    zoneShapes.clearLayers();
+    zoneParking.clearLayers();
+    for(const zone of ZONES){
+      try{
+        if(zone.kind === 'paid_parking'){
+          if(!Number.isFinite(+zone.lat) || !Number.isFinite(+zone.lon)) continue;
+          const marker = L.marker([+zone.lat,+zone.lon], {
+            icon:L.divIcon({className:'',html:'<span class="zone-parking-icon">P</span>',iconSize:[24,24],iconAnchor:[12,12]})
+          });
+          marker.bindPopup(zonePopupHtml(zone),{maxWidth:320});
+          zoneParking.addLayer(marker);
+          continue;
+        }
+        if(!zone.geometry) continue;
+        const featureLayer = L.geoJSON({type:'Feature',properties:{},geometry:zone.geometry},{style:zoneStyle(zone.kind)});
+        featureLayer.bindPopup(zonePopupHtml(zone),{maxWidth:320});
+        zoneShapes.addLayer(featureLayer);
+      }catch(e){ /* vadná jednotlivá geometrie nesmí zablokovat celou mapu */ }
+    }
+    updateZoneLegend();
+  }
+
   function initMap(){
     // Vytvoř mapu se středem aktuálně vybrané země (při prvním startu Česko)
     const cc = countryCfg();
-    map = L.map('map', {zoomControl:true}).setView(cc.center, cc.zoom); // střed a zoom
+    map = L.map('map', {zoomControl:true,maxZoom:19}).setView(cc.center, cc.zoom); // střed a zoom
 
     // Satelitní (fotografická) podkladová vrstva – Esri World Imagery (zdarma, bez klíče)
     const sat = L.tileLayer(
@@ -1445,10 +1623,16 @@
       {maxZoom:19, attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>'}
     );
 
-    // Přepínač podkladových vrstev vpravo nahoře
+    zoneShapes = L.layerGroup();
+    zoneParking = L.markerClusterGroup({maxClusterRadius:42,showCoverageOnHover:false,disableClusteringAtZoom:16});
+    zoneOverlay = L.layerGroup([zoneShapes,zoneParking]);
+    if(zonesEnabled) zoneOverlay.addTo(map);
+
+    // Přepínač podkladových vrstev a turistické dopravní vrstvy vpravo nahoře
     layers = L.control.layers(
       {'🛰️ Satelit': satGroup, '🗺️ Mapa (OSM)': street},        // pojmenované podklady
-      null, {position:'topright'}                                // umístění ovladače
+      {'🚗 Zóny a omezení':zoneOverlay},
+      {position:'topright',collapsed:window.matchMedia('(max-width:700px)').matches}
     ).addTo(map);                                                // přidej na mapu
 
     satGroup.addTo(map);                                         // satelit jako výchozí (chtěná fotomapa)
@@ -1459,6 +1643,17 @@
       showCoverageOnHover:false                                  // nevykreslovat obal shluku při najetí
     });
     map.addLayer(cluster);                                       // přidej vrstvu shluků na mapu
+
+    map.on('overlayadd',event=>{
+      if(event.layer !== zoneOverlay) return;
+      zonesEnabled = true; safeSet(ZONES_KEY,true); updateZoneLegend();
+      if(!zonesAvailable) toast('Zóny se zobrazí po příští aktualizaci dat na GitHubu');
+    });
+    map.on('overlayremove',event=>{
+      if(event.layer !== zoneOverlay) return;
+      zonesEnabled = false; safeSet(ZONES_KEY,false); updateZoneLegend();
+    });
+    updateZoneLegend();
 
     initLocate();                                                // přidej ovládání „Moje poloha"
   }
