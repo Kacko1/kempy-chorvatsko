@@ -20,12 +20,14 @@ const MAX_ATTEMPTS = numberFromEnv('OVERPASS_MAX_ATTEMPTS', 5);
 
 const COUNTRIES = [
   { id:'cz', iso:'CZ', label:'Česko', file:'cesko_data.json', nameTag:'name:cs' },
-  { id:'at', iso:'AT', label:'Rakousko', file:'rakousko_data.json', nameTag:'name:de' },
-  { id:'si', iso:'SI', label:'Slovinsko', file:'slovinsko_data.json', nameTag:'name:sl' },
   { id:'hr', iso:'HR', label:'Chorvatsko', file:'chorvatsko_data.json', nameTag:'name:hr' },
+  { id:'it', iso:'IT', label:'Itálie', file:'italie_data.json', nameTag:'name:it' },
+  { id:'de', iso:'DE', label:'Německo', file:'nemecko_data.json', nameTag:'name:de' },
   { id:'pl', iso:'PL', label:'Polsko', file:'polsko_data.json', nameTag:'name:pl' },
+  { id:'at', iso:'AT', label:'Rakousko', file:'rakousko_data.json', nameTag:'name:de' },
   { id:'sk', iso:'SK', label:'Slovensko', file:'slovensko_data.json', nameTag:'name:sk' },
-  { id:'de', iso:'DE', label:'Německo', file:'nemecko_data.json', nameTag:'name:de' }
+  { id:'si', iso:'SI', label:'Slovinsko', file:'slovinsko_data.json', nameTag:'name:sl' },
+  { id:'ch', iso:'CH', label:'Švýcarsko', file:'svycarsko_data.json', nameTag:'name:de' }
 ];
 
 const TABS = {
@@ -161,6 +163,30 @@ function selectorToQuery(selector){
   return 'nwr["' + key + '"="' + value + '"]' + (named ? '["name"]' : '') + '(area.country);';
 }
 
+// Sloučí více hodnot stejného OSM klíče do jednoho regex dotazu.
+// Je to výrazně šetrnější k limitům Overpassu (zejména pro velké země).
+function selectorsToQuery(selectors){
+  const grouped = new Map();
+  for(const selector of selectors){
+    let named = false;
+    let valueSelector = selector;
+    if(valueSelector.endsWith('#named')){
+      named = true;
+      valueSelector = valueSelector.slice(0, -6);
+    }
+    const divider = valueSelector.indexOf('=');
+    const key = valueSelector.slice(0, divider);
+    const value = valueSelector.slice(divider + 1);
+    const groupKey = key + '|' + named;
+    if(!grouped.has(groupKey)) grouped.set(groupKey, {key, named, values:[]});
+    grouped.get(groupKey).values.push(value);
+  }
+  return [...grouped.values()].map(group=>{
+    const pattern = group.values.map(value=>value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    return 'nwr["' + group.key + '"~"^(' + pattern + ')$"' + (group.named ? '["name"]' : '') + '](area.country);';
+  }).join('');
+}
+
 function buildQuery(country, tabId){
   if(tabId === 'camps'){
     return '[out:json][timeout:120];area["ISO3166-1"="' + country.iso + '"]->.country;('
@@ -169,7 +195,7 @@ function buildQuery(country, tabId){
       + ');out center tags;';
   }
   const selectors = TABS[tabId].cats.flatMap(category=>category.sel);
-  const body = selectors.map(selectorToQuery).join('');
+  const body = selectorsToQuery(selectors);
   return '[out:json][timeout:120];area["ISO3166-1"="' + country.iso + '"]->.country;('
     + body + ');out center tags;';
 }
@@ -204,7 +230,9 @@ async function fetchTab(country, tabId){
     for(const endpoint of OVERPASS){
       try{
         console.log('  ' + TABS[tabId].label + ': pokus ' + attempt + '/' + MAX_ATTEMPTS + ' přes ' + new URL(endpoint).host);
-        return await requestOverpass(endpoint, query);
+        const json = await requestOverpass(endpoint, query);
+        if(json.elements.length === 0) throw new Error('server vrátil prázdná data');
+        return json;
       }catch(error){
         lastError = error;
         console.warn('    selhalo: ' + error.message);
@@ -250,6 +278,8 @@ function regionOf(countryId, lat, lon){
   if(countryId === 'pl') return lon < 17.2 ? 'Západní Polsko' : (lon < 20.5 ? 'Střední Polsko' : 'Východní Polsko');
   if(countryId === 'sk') return lon < 18.3 ? 'Západní Slovensko' : (lon < 20.5 ? 'Střední Slovensko' : 'Východní Slovensko');
   if(countryId === 'de') return lon < 8.5 ? 'Západní Německo' : (lon < 12.5 ? 'Střední Německo' : 'Východní Německo');
+  if(countryId === 'it') return lat >= 44.5 ? 'Severní Itálie' : (lat >= 41.5 ? 'Střední Itálie' : 'Jižní Itálie a ostrovy');
+  if(countryId === 'ch') return lon < 7.5 ? 'Západní Švýcarsko' : (lon < 8.8 ? 'Střední Švýcarsko' : 'Východní Švýcarsko');
   return 'Ostatní';
 }
 
@@ -382,11 +412,11 @@ async function buildCountry(country){
 }
 
 function runChecks(){
-  assert.equal(COUNTRIES.length, 7);
+  assert.equal(COUNTRIES.length, 9);
   assert.equal(Object.keys(TABS).length, 7);
   assert.deepEqual(COUNTRIES.map(country=>country.file), [
-    'cesko_data.json','rakousko_data.json','slovinsko_data.json','chorvatsko_data.json',
-    'polsko_data.json','slovensko_data.json','nemecko_data.json'
+    'cesko_data.json','chorvatsko_data.json','italie_data.json','nemecko_data.json',
+    'polsko_data.json','rakousko_data.json','slovensko_data.json','slovinsko_data.json','svycarsko_data.json'
   ]);
   for(const country of COUNTRIES){
     for(const tabId of Object.keys(TABS)){
