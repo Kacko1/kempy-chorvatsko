@@ -259,6 +259,9 @@
     /* Přebarvení shluků značek do tématu aplikace */
     .marker-cluster{background:rgba(45,212,191,.25)}         /* vnější kruh shluku */
     .marker-cluster div{background:rgba(45,212,191,.85);color:#04231f;font-weight:700} /* vnitřní kruh s číslem */
+    .sc-cluster{background:rgba(45,212,191,.28);border:2px solid rgba(45,212,191,.55);border-radius:50%;display:flex;align-items:center;justify-content:center;box-sizing:border-box}
+    .sc-cluster span{background:rgba(45,212,191,.9);color:#04231f;border-radius:50%;width:78%;height:78%;display:flex;align-items:center;justify-content:center;font:700 10px/1 system-ui;white-space:nowrap}
+    .list-note{padding:8px 14px;border-bottom:1px solid var(--line);color:var(--muted);font-size:11px;line-height:1.35}
 
     /* Překryvná dopravní vrstva: plochy zón a značky placeného parkování */
     .zone-swatch{width:13px;height:10px;border-radius:3px;border:2px solid currentColor;opacity:.9}
@@ -571,6 +574,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <!-- Plugin pro shlukování značek z CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+  <!-- Prostorový index: do Leafletu posílá jen shluky a body v aktuálním výřezu -->
+  <script src="https://unpkg.com/supercluster@8.0.1/dist/supercluster.min.js"></script>
   <!-- Komprese dat pro cache (aby se do úložiště vešlo i „vše") -->
   <!-- LZString vložený přímo (bez závislosti na CDN, funguje i offline) -->
   <script>var LZString=function(){var r=String.fromCharCode,o="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",n="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$",e={};function t(r,o){if(!e[r]){e[r]={};for(var n=0;n<r.length;n++)e[r][r.charAt(n)]=n}return e[r][o]}var i={compressToBase64:function(r){if(null==r)return"";var n=i._compress(r,6,function(r){return o.charAt(r)});switch(n.length%4){default:case 0:return n;case 1:return n+"===";case 2:return n+"==";case 3:return n+"="}},decompressFromBase64:function(r){return null==r?"":""==r?null:i._decompress(r.length,32,function(n){return t(o,r.charAt(n))})},compressToUTF16:function(o){return null==o?"":i._compress(o,15,function(o){return r(o+32)})+" "},decompressFromUTF16:function(r){return null==r?"":""==r?null:i._decompress(r.length,16384,function(o){return r.charCodeAt(o)-32})},compressToUint8Array:function(r){for(var o=i.compress(r),n=new Uint8Array(2*o.length),e=0,t=o.length;e<t;e++){var s=o.charCodeAt(e);n[2*e]=s>>>8,n[2*e+1]=s%256}return n},decompressFromUint8Array:function(o){if(null==o)return i.decompress(o);for(var n=new Array(o.length/2),e=0,t=n.length;e<t;e++)n[e]=256*o[2*e]+o[2*e+1];var s=[];return n.forEach(function(o){s.push(r(o))}),i.decompress(s.join(""))},compressToEncodedURIComponent:function(r){return null==r?"":i._compress(r,6,function(r){return n.charAt(r)})},decompressFromEncodedURIComponent:function(r){return null==r?"":""==r?null:(r=r.replace(/ /g,"+"),i._decompress(r.length,32,function(o){return t(n,r.charAt(o))}))},compress:function(o){return i._compress(o,16,function(o){return r(o)})},_compress:function(r,o,n){if(null==r)return"";var e,t,i,s={},u={},a="",p="",c="",l=2,f=3,h=2,d=[],m=0,v=0;for(i=0;i<r.length;i+=1)if(a=r.charAt(i),Object.prototype.hasOwnProperty.call(s,a)||(s[a]=f++,u[a]=!0),p=c+a,Object.prototype.hasOwnProperty.call(s,p))c=p;else{if(Object.prototype.hasOwnProperty.call(u,c)){if(c.charCodeAt(0)<256){for(e=0;e<h;e++)m<<=1,v==o-1?(v=0,d.push(n(m)),m=0):v++;for(t=c.charCodeAt(0),e=0;e<8;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}else{for(t=1,e=0;e<h;e++)m=m<<1|t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t=0;for(t=c.charCodeAt(0),e=0;e<16;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}0==--l&&(l=Math.pow(2,h),h++),delete u[c]}else for(t=s[c],e=0;e<h;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1;0==--l&&(l=Math.pow(2,h),h++),s[p]=f++,c=String(a)}if(""!==c){if(Object.prototype.hasOwnProperty.call(u,c)){if(c.charCodeAt(0)<256){for(e=0;e<h;e++)m<<=1,v==o-1?(v=0,d.push(n(m)),m=0):v++;for(t=c.charCodeAt(0),e=0;e<8;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}else{for(t=1,e=0;e<h;e++)m=m<<1|t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t=0;for(t=c.charCodeAt(0),e=0;e<16;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}0==--l&&(l=Math.pow(2,h),h++),delete u[c]}else for(t=s[c],e=0;e<h;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1;0==--l&&(l=Math.pow(2,h),h++)}for(t=2,e=0;e<h;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1;for(;;){if(m<<=1,v==o-1){d.push(n(m));break}v++}return d.join("")},decompress:function(r){return null==r?"":""==r?null:i._decompress(r.length,32768,function(o){return r.charCodeAt(o)})},_decompress:function(o,n,e){var t,i,s,u,a,p,c,l=[],f=4,h=4,d=3,m="",v=[],g={val:e(0),position:n,index:1};for(t=0;t<3;t+=1)l[t]=t;for(s=0,a=Math.pow(2,2),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;switch(s){case 0:for(s=0,a=Math.pow(2,8),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;c=r(s);break;case 1:for(s=0,a=Math.pow(2,16),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;c=r(s);break;case 2:return""}for(l[3]=c,i=c,v.push(c);;){if(g.index>o)return"";for(s=0,a=Math.pow(2,d),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;switch(c=s){case 0:for(s=0,a=Math.pow(2,8),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;l[h++]=r(s),c=h-1,f--;break;case 1:for(s=0,a=Math.pow(2,16),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;l[h++]=r(s),c=h-1,f--;break;case 2:return v.join("")}if(0==f&&(f=Math.pow(2,d),d++),l[c])m=l[c];else{if(c!==h)return null;m=i+i.charAt(0)}v.push(m),l[h++]=i+m.charAt(0),i=m,0==--f&&(f=Math.pow(2,d),d++)}}};return i}();"function"==typeof define&&define.amd?define(function(){return LZString}):"undefined"!=typeof module&&null!=module?module.exports=LZString:"undefined"!=typeof angular&&null!=angular&&angular.module("LZString",[]).factory("LZString",function(){return LZString});</script>
@@ -815,6 +820,11 @@
   let nominatimPending = false; // ochrana veřejného geokodéru před souběžnými požadavky
   let lastNominatimAt = 0;      // Nominatim dovoluje nejvýše jeden požadavek za sekundu
   const markerById = {};        // rychlý přístup ke značce podle ID
+  let spatialIndex = null;       // index všech vyfiltrovaných bodů pro aktuální záložku
+  let spatialSites = [];         // pořadí objektů odpovídající indexům ve spatialIndex
+  let visibleRenderFrame = 0;    // sloučení více událostí pohybu mapy do jednoho překreslení
+  let filterTimer = 0;           // krátké zpoždění hledání, aby se milionový index nestavěl po každé klávese
+  const LIST_LIMIT = 300;        // nejvýše tolik DOM řádků najednou (hlavně kvůli mobilům)
   let activeId = null;          // ID právě otevřeného místa v detailu
   const tabFetchedAt = {};      // čas stažení dat pro každou záložku
   let bakedData = null;         // data načtená z přibaleného souboru (nebo null)
@@ -1188,7 +1198,9 @@
       const r = await fetch(bakedFilename(), {cache:'no-cache'}); // soubor vybrané země vedle appky
       if(!r.ok) return false;                                  // soubor pro zemi není
       let obj = await r.json();                                // načti JSON
-      if(obj && obj.compressed === 'gzip-base64-v1'){
+      if(obj && obj.compressed === 'gzip-tabs-base64-v1'){
+        // Nový formát zůstane zabalený; jednotlivé záložky se rozbalují až při otevření.
+      }else if(obj && obj.compressed === 'gzip-base64-v1'){
         document.getElementById('status').textContent = 'Rozbaluji data – '+countryCfg().label+'…';
         obj = await decompressGzipBundle(obj.z);               // nový rychlý formát
       }else if(obj && obj.compressed === true && typeof LZString !== 'undefined'){
@@ -1202,10 +1214,36 @@
     }catch(e){ bakedLoadError = e; console.error(e); return false; }
   }
 
+  async function loadBakedPart(id){
+    if(!bakedData || bakedData.compressed !== 'gzip-tabs-base64-v1') return false;
+    const part = bakedData.parts && bakedData.parts[id];
+    if(!part || !part.z) return false;
+    document.getElementById('status').textContent = 'Rozbaluji '+(id==='zones' ? 'zóny' : TABS[id].label.toLowerCase())+' – '+countryCfg().label+'…';
+    const parsed = await decompressGzipBundle(part.z);
+    if(!parsed || !Array.isArray(parsed.data)) return false;
+    if(id === 'zones'){
+      ZONES = parsed.data;
+      zonesAvailable = true;
+    }else{
+      DATA[id] = parsed.data;
+      tabFetchedAt[id] = parsed.fetchedAt;
+    }
+    return true;
+  }
+
   // Naplní data všech záložek z přibaleného souboru (volá se při vstupu do baked režimu)
-  function applyBaked(){
+  async function applyBaked(){
     for(const id in DATA) delete DATA[id];
     for(const id in tabFetchedAt) delete tabFetchedAt[id];
+    if(bakedData.compressed === 'gzip-tabs-base64-v1'){
+      await loadBakedPart(activeTab);
+      zonesAvailable = !!(bakedData.parts && bakedData.parts.zones);
+      ZONES = [];
+      // Zóny bývají malé; rozbalíme je jen tehdy, když je uživatel opravdu zobrazuje.
+      if(zonesEnabled && zonesAvailable) await loadBakedPart('zones');
+      renderZoneOverlay();
+      return;
+    }
     for(const id in TABS){
       if(bakedData[id] && bakedData[id].data){ DATA[id] = bakedData[id].data; tabFetchedAt[id] = bakedData[id].fetchedAt; }
     }
@@ -1317,7 +1355,7 @@
     if(mode === 'baked'){                                     // přepínám na offline
       const hasBaked = bakedData || await loadBaked();
       if(hasBaked){
-        applyBaked();                                         // naplň data ze souboru
+        await applyBaked();                                   // naplň data ze souboru
         ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]); // překresli
       }else{
         for(const id in DATA) delete DATA[id]; ALL=[];
@@ -1355,6 +1393,7 @@
     for(const id in DATA) delete DATA[id];
     for(const id in tabFetchedAt) delete tabFetchedAt[id];
     ALL = []; FILTERED = []; bakedData = null; activeId = null;
+    renderMarkers([]); renderList([]);                         // hned uvolni i prostorový index předchozí země
     ZONES = []; zonesAvailable = false;
     renderZoneOverlay();
     USER = loadUser();
@@ -1367,7 +1406,7 @@
     const hasBaked = await loadBaked();
     if(sourceMode==='baked'){
       if(hasBaked){
-        applyBaked(); ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]);
+        await applyBaked(); ALL = getTabData(activeTab); afterLoad(tabFetchedAt[activeTab]);
       }else{
         afterLoad(null);
         toast(bakedLoadError
@@ -1637,16 +1676,18 @@
 
     satGroup.addTo(map);                                         // satelit jako výchozí (chtěná fotomapa)
 
-    // Vrstva shluků značek (kvůli výkonu při stovkách bodů)
-    cluster = L.markerClusterGroup({
-      maxClusterRadius:45,                                       // poloměr shlukování v px
-      showCoverageOnHover:false                                  // nevykreslovat obal shluku při najetí
-    });
-    map.addLayer(cluster);                                       // přidej vrstvu shluků na mapu
+    // Do této lehké vrstvy se vkládají jen shluky a body aktuálně viditelného výřezu.
+    cluster = L.layerGroup().addTo(map);
+    map.on('moveend zoomend', scheduleVisibleRender);
 
-    map.on('overlayadd',event=>{
+    map.on('overlayadd',async event=>{
       if(event.layer !== zoneOverlay) return;
       zonesEnabled = true; safeSet(ZONES_KEY,true); updateZoneLegend();
+      if(zonesAvailable && !ZONES.length && bakedData && bakedData.compressed === 'gzip-tabs-base64-v1'){
+        const previousStatus=document.getElementById('status').textContent;
+        try{ await loadBakedPart('zones'); renderZoneOverlay(); document.getElementById('status').textContent=previousStatus; }
+        catch(e){ console.error(e); toast('Zóny se nepodařilo rozbalit'); }
+      }
       if(!zonesAvailable) toast('Zóny se zobrazí po příští aktualizaci dat na GitHubu');
     });
     map.on('overlayremove',event=>{
@@ -1713,7 +1754,7 @@
       // Přepočítej při úplně prvním fixu, nebo když se u řazení dle vzdálenosti posunu o >200 m
       if(!lastAppliedLoc || (sortBy==='dist' && moved>200)){
         lastAppliedLoc = userLoc;                               // zapamatuj polohu přepočtu
-        applyFilters();                                         // překresli seznam (přidá/aktualizuje vzdálenosti)
+        renderList(FILTERED);                                   // index mapy se kvůli vzdálenosti nemusí znovu stavět
       }
     });
 
@@ -1807,21 +1848,89 @@
      ========================================================================= */
 
   function renderMarkers(list){
-    cluster.clearLayers();                                       // smaž staré značky
-    for(const id in markerById) delete markerById[id];          // vyprázdni rejstřík značek
-    const markers = [];                                         // dočasné pole značek
-    for(const site of list){                                    // pro každý vyfiltrovaný kemp
-      const m = L.marker([site.lat, site.lon], {icon:iconFor(site)}); // vytvoř značku s ikonou
-      m.bindPopup(popupHtml(site), {minWidth:210});             // připoj rychlý popup
-      m.on('click', ()=>{ activeId = site.id; });               // klik zapamatuje aktivní kemp
-      m.on('popupopen', (e)=>{                                   // po otevření popupu
-        const btn = e.popup.getElement().querySelector('[data-detail]'); // najdi tlačítko Detail
-        if(btn) btn.onclick = ()=> openDetail(site.id);         // navěš otevření detailu
-      });
-      markerById[site.id] = m;                                  // ulož značku do rejstříku
-      markers.push(m);                                          // přidej do dočasného pole
+    cluster.clearLayers();
+    for(const id in markerById) delete markerById[id];
+    spatialSites = list;
+    spatialIndex = null;
+    if(!list.length) return;
+    if(typeof Supercluster === 'undefined'){
+      toast('Nelze načíst knihovnu pro rychlé shlukování bodů');
+      renderVisibleMarkers();
+      return;
     }
-    cluster.addLayers(markers);                                 // hromadně přidej všechny značky (rychlejší)
+    const points = [];
+    for(let i=0;i<list.length;i++){
+      const site = list[i], lat = +site.lat, lon = +site.lon;
+      if(!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      points.push({type:'Feature',geometry:{type:'Point',coordinates:[lon,lat]},properties:{i}});
+    }
+    spatialIndex = new Supercluster({radius:45,maxZoom:18,minPoints:2,nodeSize:64}).load(points);
+    renderVisibleMarkers();
+  }
+
+  function clusterCountIcon(count){
+    const digits = String(count).length;
+    const size = digits >= 7 ? 64 : digits >= 6 ? 58 : digits >= 5 ? 52 : digits >= 4 ? 46 : 40;
+    return L.divIcon({
+      className:'sc-cluster',
+      html:'<span>'+Number(count).toLocaleString('cs-CZ')+'</span>',
+      iconSize:[size,size],iconAnchor:[size/2,size/2]
+    });
+  }
+
+  function makeSiteMarker(site){
+    const m = L.marker([site.lat,site.lon],{icon:iconFor(site)});
+    m.bindPopup(popupHtml(site),{minWidth:210});
+    m.on('click',()=>{ activeId=site.id; });
+    m.on('popupopen',e=>{
+      const root=e.popup.getElement(), btn=root&&root.querySelector('[data-detail]');
+      if(btn) btn.onclick=()=>openDetail(site.id);
+    });
+    markerById[site.id]=m;
+    return m;
+  }
+
+  function renderVisibleMarkers(){
+    if(!map || !cluster) return;
+    cluster.clearLayers();
+    for(const id in markerById) delete markerById[id];
+    if(!spatialSites.length) return;
+    const bounds = map.getBounds();
+    const bbox = [bounds.getWest(),bounds.getSouth(),bounds.getEast(),bounds.getNorth()];
+    const markers = [];
+    if(spatialIndex){
+      const zoom = Math.max(0,Math.min(19,Math.floor(map.getZoom())));
+      for(const feature of spatialIndex.getClusters(bbox,zoom)){
+        const lon=feature.geometry.coordinates[0], lat=feature.geometry.coordinates[1], props=feature.properties||{};
+        if(props.cluster){
+          const m=L.marker([lat,lon],{icon:clusterCountIcon(props.point_count),keyboard:false});
+          m.on('click',()=>{
+            const next=Math.min(map.getMaxZoom(),spatialIndex.getClusterExpansionZoom(props.cluster_id));
+            map.setView([lat,lon],next,{animate:true});
+          });
+          markers.push(m);
+        }else{
+          const site=spatialSites[props.i];
+          if(site) markers.push(makeSiteMarker(site));
+        }
+      }
+    }else{
+      // Nouzová varianta při nedostupném CDN: alespoň body v aktuálním výřezu, nejvýše 2000.
+      for(const site of spatialSites){
+        if(bounds.contains([site.lat,site.lon])) markers.push(makeSiteMarker(site));
+        if(markers.length>=2000) break;
+      }
+    }
+    cluster.addLayer(L.layerGroup(markers));
+  }
+
+  function scheduleVisibleRender(){
+    cancelAnimationFrame(visibleRenderFrame);
+    visibleRenderFrame=requestAnimationFrame(()=>{
+      visibleRenderFrame=0;
+      renderVisibleMarkers();
+      renderList(FILTERED);
+    });
   }
 
   // HTML obsahu rychlého popupu nad značkou
@@ -1860,9 +1969,35 @@
       el.innerHTML = '<div style="padding:24px 14px;color:var(--muted);font-size:13px">Nic neodpovídá filtrům. Zkus je uvolnit.</div>'; // prázdný stav
       return;                                                   // konec
     }
+    const q = document.getElementById('search').value.trim();
+    const bounds = map && map.getBounds();
+    const shown = [];
+    // Bez textového hledání seznam sleduje mapu. Vždy vytváříme nejvýše 300 řádků,
+    // zatímco číslo v záhlaví i počty shluků stále zahrnují všechny výsledky.
+    for(const site of list){
+      if(!q && bounds && !bounds.contains([site.lat,site.lon])) continue;
+      shown.push(site);
+      if(shown.length > LIST_LIMIT) break;
+    }
+    const truncated = shown.length > LIST_LIMIT;
+    if(truncated) shown.length = LIST_LIMIT;
+    if(!shown.length){
+      el.innerHTML = '<div class="list-note">V tomto výřezu nejsou jednotlivá místa. Přesuň mapu nebo oddal zobrazení.</div>';
+      return;
+    }
+    const sortBy = document.getElementById('sort').value;
+    shown.sort((a,b)=>{
+      if(sortBy==='dist' && userLoc) return distTo(a)-distTo(b);
+      if(sortBy==='stars') return (b.stars||0)-(a.stars||0);
+      if(sortBy==='region') return a.region.localeCompare(b.region,'cs') || a.name.localeCompare(b.name,'cs');
+      return a.name.localeCompare(b.name,'cs');
+    });
     const sights = isPoi();                                     // jsme na POI záložce?
-    // Sestav HTML všech položek najednou (rychlejší než přidávat po jedné)
-    el.innerHTML = list.map(site=>{
+    const note = truncated
+      ? '<div class="list-note">Zobrazeno prvních '+LIST_LIMIT+' míst '+(q?'z výsledků hledání':'v aktuálním výřezu')+'. Přibliž mapu nebo zpřesni filtr.</div>'
+      : '';
+    // Sestav HTML viditelných položek najednou.
+    el.innerHTML = note + shown.map(site=>{
       const d = distTo(site);                                    // vzdálenost od mé polohy (nebo null)
       const dist = d != null ? `<span class="tag dist">${fmtDist(d)}</span>` : ''; // štítek vzdálenosti
       const mk = (isVisited(site)?'<span class="tag tv">✔</span>':'')+(isFav(site)?'<span class="tag tf">★</span>':''); // označení
@@ -1902,9 +2037,12 @@
   function focusSite(id){
     const site = ALL.find(s=>s.id===id);                        // najdi kemp podle ID
     if(!site) return;                                           // pojistka
+    map.once('moveend',()=>{
+      renderVisibleMarkers();
+      const marker=markerById[id];
+      if(marker) marker.openPopup();
+    });
     map.flyTo([site.lat, site.lon], 15, {duration:.6});         // plynulý přelet na místo
-    const m = markerById[id];                                   // odpovídající značka
-    if(m) cluster.zoomToShowLayer(m, ()=> m.openPopup());       // rozbal shluk a otevři popup
     openDetail(id);                                             // otevři detailní panel
     if(window.innerWidth <= 760) closeSidebar();               // na mobilu zavři sidebar
   }
@@ -1917,7 +2055,6 @@
     const q = document.getElementById('search').value.trim().toLowerCase(); // hledaný text
     const region = document.getElementById('region').value;    // vybraná oblast
     const minStars = parseInt(document.getElementById('stars').value,10); // minimum hvězd
-    const sortBy = document.getElementById('sort').value;      // způsob řazení
 
     FILTERED = ALL.filter(site=>{                              // projdi aktivní dataset
       // Textové hledání v názvu, městě a oblasti
@@ -1952,16 +2089,6 @@
       if(flags.fav && !isFav(site)) return false;              // jen oblíbené
       if(minStars && (!site.stars || site.stars < minStars)) return false; // málo hvězd
       return true;                                             // prošlo
-    });
-
-    // Seřaď výsledky podle zvoleného klíče
-    FILTERED.sort((a,b)=>{
-      if(sortBy==='dist' && userLoc){                          // řazení podle vzdálenosti od mé polohy
-        return distTo(a) - distTo(b);                          // nejbližší nahoře
-      }
-      if(sortBy==='stars') return (b.stars||0)-(a.stars||0);   // podle hvězd sestupně
-      if(sortBy==='region') return a.region.localeCompare(b.region,'cs') || a.name.localeCompare(b.name,'cs'); // podle oblasti
-      return a.name.localeCompare(b.name,'cs');                // výchozí A–Z
     });
 
     renderList(FILTERED);                                       // překresli seznam
@@ -2475,7 +2602,8 @@
 
   // Naplní rozbalovací seznam oblastí podle skutečně přítomných kempů
   function fillRegions(){
-    const set = new Set(ALL.map(s=>s.region));                 // unikátní oblasti
+    const set = new Set();
+    for(const site of ALL) if(site.region) set.add(site.region); // bez milionového dočasného pole
     const sel = document.getElementById('region');            // element selectu
     // Nejdřív vyprázdni (kromě první volby „Celá země"), ať se při přepnutí záložky nezdvojují
     while(sel.options.length > 1) sel.remove(1);              // odeber všechny kromě první
@@ -2495,6 +2623,21 @@
     activeTab = tab;                                          // změň aktivní záložku
     updateTabUI();                                           // vzhled: barvy, filtry, legenda
     closeDetail();                                           // zavři případný detail
+    if(sourceMode === 'baked' && bakedData && bakedData.compressed === 'gzip-tabs-base64-v1'){
+      // Uvolni předchozí velkou záložku. Zabalená kopie zůstává v bakedData a lze ji znovu rozbalit.
+      for(const id in DATA) delete DATA[id];
+      for(const id in tabFetchedAt) delete tabFetchedAt[id];
+      ALL = []; FILTERED = [];
+      renderMarkers([]); renderList([]);
+      try{
+        const loaded = await loadBakedPart(tab);
+        ALL = loaded ? getTabData(tab) : [];
+        afterLoad(tabFetchedAt[tab]);
+      }catch(e){
+        console.error(e); ALL=[]; afterLoad(null); toast('Záložku se nepodařilo rozbalit');
+      }
+      return;
+    }
     const data = getTabData(tab);                            // už načtená data?
     if(data && data.length){                                 // ano → jen aktivuj
       ALL = data;                                            // přepni dataset
@@ -2614,7 +2757,10 @@
     // Země: přepni dataset, offline soubor, cache i střed mapy.
     document.getElementById('country').addEventListener('change', function(){ switchCountry(this.value, false); });
     // Vyhledávací pole: filtruj při psaní
-    document.getElementById('search').addEventListener('input', applyFilters);
+    document.getElementById('search').addEventListener('input', ()=>{
+      clearTimeout(filterTimer);
+      filterTimer=setTimeout(applyFilters,220);
+    });
     // Změna oblasti / hvězd: přefiltruj
     document.getElementById('region').addEventListener('change', applyFilters);
     document.getElementById('stars').addEventListener('change', applyFilters);
@@ -2624,7 +2770,7 @@
         startLocate();                                          // zapni sledování polohy
         toast('Zapínám polohu pro řazení podle vzdálenosti…');  // informuj (seznam se seřadí po zaměření)
       }
-      applyFilters();                                           // přefiltruj/seřaď (do fixu zatím dle názvu)
+      renderList(FILTERED);                                     // řazení mění jen omezený viditelný seznam
     });
 
     // Přepínatelné pilulky KEMPŮ (data-filter → flags)
