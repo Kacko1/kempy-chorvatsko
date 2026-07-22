@@ -275,6 +275,10 @@
       display:flex;align-items:flex-start;gap:10px;flex:0 0 auto;
     }
     #dhead h2{font-size:16px;line-height:1.2;flex:1 1 auto}    /* název zabírá volné místo */
+    #dname{color:var(--ink);text-decoration:none;cursor:pointer} /* název vyhledá konkrétní místo v Google Maps */
+    #dname::after{content:' ↗';font-size:12px;color:var(--muted)}
+    #dname:hover{text-decoration:underline}
+    #dname:focus-visible{outline:2px solid var(--sea);outline-offset:3px;border-radius:3px}
     #dclose{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1} /* zavírací křížek */
     #dclose:hover{color:var(--ink)}
 
@@ -514,7 +518,7 @@
       <!-- Detailní panel jednoho kempu (naplní JS) — uvnitř těla, aby nedělal šířku navíc -->
       <div id="detail">
         <div id="dhead">
-          <h2 id="dname">—</h2>
+          <h2><a id="dname" href="#" target="_blank" rel="noopener" title="Vyhledat toto místo v Google Maps">—</a></h2>
           <button id="dclose" title="Zavřít">×</button>
         </div>
         <div id="dbody"></div>
@@ -1792,9 +1796,19 @@
     const q = encodeURIComponent(site.name+' '+(site.city||site.region||'')+' '+countryCfg().search); // obecný dotaz
     return 'https://www.google.com/search?q='+q;               // odkaz na Google
   }
+  // Google Maps – hledání konkrétního podniku podle názvu a nejpřesnější známé adresy
+  function placeMapsUrl(site){
+    const editedAddress = USER[site.id] && USER[site.id].addr;  // ručně opravená adresa má přednost
+    const location = editedAddress || site.addr || site.city || site.region || '';
+    const parts = [site.name,location,countryCfg().search]
+      .filter(Boolean)
+      .filter((value,index,array)=>array.findIndex(item=>item.toLowerCase()===value.toLowerCase())===index);
+    return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(parts.join(', '));
+  }
   // Google Maps – přesný bod pro navigaci
   function mapsUrl(site){
-    return 'https://www.google.com/maps/search/?api=1&query='+site.lat+','+site.lon; // pin na souřadnicích
+    const coordinates = Number(site.lat)+','+Number(site.lon);
+    return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(coordinates); // pin na přesných souřadnicích
   }
   // Google Maps – trasa k cíli
   function directionsUrl(site){
@@ -1816,7 +1830,10 @@
     if(!site) return;                                          // pojistka
     activeId = id;                                             // zapamatuj aktivní
     const u = USER[id] || {};                                  // moje editace
-    document.getElementById('dname').textContent = site.name; // vlož název do hlavičky
+    const nameLink = document.getElementById('dname');        // klikací název v hlavičce
+    nameLink.textContent = site.name;
+    nameLink.href = placeMapsUrl(site);                        // podnik podle názvu + adresy/města + země
+    nameLink.setAttribute('aria-label',site.name+' – vyhledat podnik v Google Maps');
 
     if(isPoi()){ openPoiDetail(id, site, u); return; }         // POI záložka má vlastní detail
 
@@ -1885,8 +1902,8 @@
           <a class="lnk" target="_blank" rel="noopener" href="${bookingUrl(site)}">
             <span class="ic">🏨</span>Hledat na Booking.com
           </a>
-          <a class="lnk" target="_blank" rel="noopener" href="${mapsUrl(site)}">
-            <span class="ic">📍</span>Otevřít v Google Maps
+          <a class="lnk" target="_blank" rel="noopener" href="${placeMapsUrl(site)}">
+            <span class="ic">📍</span>Vyhledat podnik v Google Maps
           </a>
           <a class="lnk" target="_blank" rel="noopener" href="${directionsUrl(site)}">
             <span class="ic">🧭</span>Navigovat sem
@@ -1987,8 +2004,8 @@
           </a>
           ${wiki ? `<a class="lnk" target="_blank" rel="noopener" href="${wiki}"><span class="ic">📖</span>Wikipedie</a>` : ''}
           ${activeTab==='lodging' ? `<a class="lnk" target="_blank" rel="noopener" href="${bookingUrl(site)}"><span class="ic">🏨</span>Hledat na Booking.com</a>` : ''}
-          <a class="lnk" target="_blank" rel="noopener" href="${mapsUrl(site)}">
-            <span class="ic">📍</span>Otevřít v Google Maps
+          <a class="lnk" target="_blank" rel="noopener" href="${placeMapsUrl(site)}">
+            <span class="ic">📍</span>Vyhledat místo v Google Maps
           </a>
           <a class="lnk" target="_blank" rel="noopener" href="${directionsUrl(site)}">
             <span class="ic">🧭</span>Navigovat sem
