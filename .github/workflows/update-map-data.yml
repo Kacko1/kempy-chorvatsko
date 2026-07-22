@@ -45,13 +45,13 @@ jobs:
       - name: Uložení změněných JSON souborů
         shell: bash
         run: |
-          if [[ -z "$(git status --porcelain -- cesko_data.json rakousko_data.json slovinsko_data.json chorvatsko_data.json polsko_data.json slovensko_data.json nemecko_data.json)" ]]; then
+          if [[ -z "$(git status --porcelain -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json slovinsko_data.json svycarsko_data.json)" ]]; then
             echo "JSON soubory se nezměnily."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- cesko_data.json rakousko_data.json slovinsko_data.json chorvatsko_data.json polsko_data.json slovensko_data.json nemecko_data.json
+          git add -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json slovinsko_data.json svycarsko_data.json
           git commit -m "Automatická aktualizace mapových dat"
           git push
