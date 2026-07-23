@@ -1,6 +1,7 @@
 # Licence mapových dat
 
-Datové soubory `*_data.json` jsou odvozené z dat projektu OpenStreetMap.
+Datové manifesty `*_data.json` a jejich komprimované části
+`map-data/*/*.json.gz` jsou odvozené z dat projektu OpenStreetMap.
 
 - Zdroj: © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright)
 - Licence: [Open Database License 1.0 (ODbL)](https://opendatacommons.org/licenses/odbl/1-0/)

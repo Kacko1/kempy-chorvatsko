@@ -922,6 +922,9 @@
   let spatialSites = [];         // pořadí objektů odpovídající indexům ve spatialIndex
   let visibleRenderFrame = 0;    // sloučení více událostí pohybu mapy do jednoho překreslení
   let lastRenderedZoom = null;   // předchozí zoom pro animaci rozdělení a spojení shluků
+  let skipNextAutoPanRender = false; // mobilní posun kvůli bublině nesmí smazat její značku
+  let autoPanResetTimer = 0;     // pojistka, kdyby prohlížeč po auto-posunu neposlal moveend
+  let openTapPopupId = null;     // zabrání překreslení při přechodu mezi dvěma mobilními bublinami
   let filterTimer = 0;           // krátké zpoždění hledání, aby se milionový index nestavěl po každé klávese
   let viewStateSaveTimer = 0;    // sloučí časté změny mapy do jediného zápisu
   let detailMapRefreshTimer = 0; // dokončení překreslení mapy po zasunutí pravého detailu
@@ -1627,6 +1630,41 @@
     return JSON.parse(await new Response(stream).text());
   }
 
+  function isLazyBakedData(value=bakedData){
+    return !!(value&&(
+      value.compressed==='gzip-tab-files-v1'
+      || value.compressed==='gzip-tabs-base64-v1'
+    ));
+  }
+
+  async function parseGzipResponse(response){
+    const blob=await response.blob();
+    const signature=new Uint8Array(await blob.slice(0,2).arrayBuffer());
+    // Některé servery mohou gzip transparentně rozbalit podle HTTP hlavičky.
+    // Kontrola signatury zabrání druhému, chybnému rozbalení.
+    if(signature[0]!==0x1f||signature[1]!==0x8b){
+      return JSON.parse(await blob.text());
+    }
+    if(typeof DecompressionStream==='undefined'){
+      throw new Error('Tento prohlížeč nepodporuje rozbalování gzip dat. Aktualizuj jej na novější verzi.');
+    }
+    const stream=blob.stream().pipeThrough(new DecompressionStream('gzip'));
+    return JSON.parse(await new Response(stream).text());
+  }
+
+  async function fetchBakedPartFile(part){
+    const version=String((bakedData&&bakedData.version)
+      || (bakedData&&bakedData._meta&&bakedData._meta.generatedAt)
+      || '1');
+    const separator=part.file.includes('?') ? '&' : '?';
+    const url=part.file+separator+'v='+encodeURIComponent(version);
+    // Verze v URL se změní při každé automatické aktualizaci. Stejnou část
+    // proto může prohlížeč bezpečně načíst z cache, nová se stáhne sama.
+    const response=await fetch(url,{cache:'force-cache'});
+    if(!response.ok) throw new Error('Datová část není dostupná: '+part.file);
+    return parseGzipResponse(response);
+  }
+
   // Při startu zkus načíst přibalený datový soubor (jen ho připraví, nenaplní hned data)
   async function loadBaked(){
     bakedData = null;
@@ -1635,7 +1673,9 @@
       const r = await fetch(bakedFilename(), {cache:'no-cache'}); // soubor vybrané země vedle appky
       if(!r.ok) return false;                                  // soubor pro zemi není
       let obj = await r.json();                                // načti JSON
-      if(obj && obj.compressed === 'gzip-tabs-base64-v1'){
+      if(obj && obj.compressed === 'gzip-tab-files-v1'){
+        // Manifest je malý; gzip soubor aktivní záložky se stáhne až níže.
+      }else if(obj && obj.compressed === 'gzip-tabs-base64-v1'){
         // Nový formát zůstane zabalený; jednotlivé záložky se rozbalují až při otevření.
       }else if(obj && obj.compressed === 'gzip-base64-v1'){
         document.getElementById('status').textContent = 'Rozbaluji data – '+countryCfg().label+'…';
@@ -1652,11 +1692,15 @@
   }
 
   async function loadBakedPart(id){
-    if(!bakedData || bakedData.compressed !== 'gzip-tabs-base64-v1') return false;
+    if(!isLazyBakedData()) return false;
     const part = bakedData.parts && bakedData.parts[id];
-    if(!part || !part.z) return false;
-    document.getElementById('status').textContent = 'Rozbaluji '+(id==='zones' ? 'zóny' : TABS[id].label.toLowerCase())+' – '+countryCfg().label+'…';
-    const parsed = await decompressGzipBundle(part.z);
+    if(!part) return false;
+    const label=id==='zones' ? 'zóny' : TABS[id].label.toLowerCase();
+    document.getElementById('status').textContent =
+      (part.file ? 'Stahuji ' : 'Rozbaluji ')+label+' – '+countryCfg().label+'…';
+    const parsed=part.file
+      ? await fetchBakedPartFile(part)
+      : (part.z ? await decompressGzipBundle(part.z) : null);
     if(!parsed || !Array.isArray(parsed.data)) return false;
     if(id === 'zones'){
       ZONES = parsed.data;
@@ -1672,7 +1716,7 @@
   async function applyBaked(){
     for(const id in DATA) delete DATA[id];
     for(const id in tabFetchedAt) delete tabFetchedAt[id];
-    if(bakedData.compressed === 'gzip-tabs-base64-v1'){
+    if(isLazyBakedData()){
       await loadBakedPart(activeTab);
       zonesAvailable = !!(bakedData.parts && bakedData.parts.zones);
       ZONES = [];
@@ -2145,7 +2189,22 @@
     const savedBaseLayer=safeGet(BASE_LAYER_KEY,'satellite');
     (savedBaseLayer==='street' ? street : satGroup).addTo(map);  // obnov poslední použitý podklad
 
-    map.on('moveend zoomend', ()=>{ scheduleVisibleRender(); scheduleViewSave(); });
+    map.on('autopanstart',()=>{
+      if(!usesTapPopup()) return;
+      skipNextAutoPanRender=true;
+      clearTimeout(autoPanResetTimer);
+      autoPanResetTimer=setTimeout(()=>{ skipNextAutoPanRender=false; },1500);
+    });
+    map.on('moveend zoomend',event=>{
+      if(event.type==='moveend'&&skipNextAutoPanRender){
+        skipNextAutoPanRender=false;
+        clearTimeout(autoPanResetTimer);
+        scheduleViewSave();
+        return;                                                  // ponech otevřenou mobilní bublinu
+      }
+      scheduleVisibleRender();
+      scheduleViewSave();
+    });
     map.on('baselayerchange',event=>{
       safeSet(BASE_LAYER_KEY,event.layer===street ? 'street' : 'satellite');
     });
@@ -2157,7 +2216,7 @@
       }
       if(event.layer !== zoneOverlay) return;
       zonesEnabled = true; safeSet(ZONES_KEY,true); updateZoneLegend();
-      if(zonesAvailable && !ZONES.length && bakedData && bakedData.compressed === 'gzip-tabs-base64-v1'){
+      if(zonesAvailable && !ZONES.length && isLazyBakedData()){
         const previousStatus=document.getElementById('status').textContent;
         try{ await loadBakedPart('zones'); renderZoneOverlay(); document.getElementById('status').textContent=previousStatus; }
         catch(e){ console.error(e); toast('Zóny se nepodařilo rozbalit'); }
@@ -2471,6 +2530,7 @@
       openDetail(site.id);
     });
     m.on('popupopen',event=>{
+      if(tapPopup) openTapPopupId=site.id;
       const popup=event.popup.getElement();
       const button=popup&&popup.querySelector('[data-detail]');
       if(!button) return;
@@ -2481,6 +2541,15 @@
         openDetail(site.id);
       };
     });
+    if(tapPopup){
+      // Po ručním zavření bubliny doplň body v části mapy odkryté auto-posunem.
+      m.on('popupclose',()=>{
+        if(openTapPopupId===site.id) openTapPopupId=null;
+        requestAnimationFrame(()=>{
+          if(!openTapPopupId) scheduleVisibleRender();
+        });
+      });
+    }
     markerById[site.id]=m;
     return m;
   }
@@ -2728,8 +2797,16 @@
     const q = document.getElementById('search').value.trim().toLowerCase(); // hledaný text
     const region = document.getElementById('region').value;    // vybraná oblast
     const minStars = parseInt(document.getElementById('stars').value,10); // minimum hvězd
+    const poi=isPoi();
+    const cfg=poi ? activeCfg() : null;
+    const f=cfg ? cfg.f : null;
+    // Kategorie se počítají jednou pro celý průchod, ne znovu u každého objektu.
+    const activeCats=cfg ? cfg.cats.filter(category=>f[category.key]).map(category=>category.key) : [];
+    const noPoiFilters=poi&&!q&&!region&&!f.notable&&!f.film&&!f.web&&!f.visited&&!f.fav&&!activeCats.length;
+    const noCampFilters=!poi&&!q&&!region&&!minStars
+      && !flags.car&&!flags.camp&&!flags.van&&!flags.web&&!flags.visited&&!flags.fav;
 
-    FILTERED = ALL.filter(site=>{                              // projdi aktivní dataset
+    FILTERED=(noPoiFilters||noCampFilters) ? ALL : ALL.filter(site=>{ // projdi aktivní dataset jen při filtrování
       // Textové hledání v názvu, městě a oblasti
       if(q){
         const hay = (site.name+' '+(site.city||'')+' '+site.region).toLowerCase(); // prohledávaný text
@@ -2738,12 +2815,10 @@
       // Filtr oblasti (sdílený)
       if(region && site.region !== region) return false;       // jiná oblast → vyřaď
 
-      if(isPoi()){                                              // ===== POI ZÁLOŽKY =====
-        const f = activeCfg().f;                                // stav filtrů této záložky
+      if(poi){                                                  // ===== POI ZÁLOŽKY =====
         if(f.notable && !site.notable) return false;           // významnost (jen turistika)
         if(f.film && !site.film) return false;                 // filmová místa (jen turistika)
-        const activeCats = activeCfg().cats.filter(c=>f[c.key]); // zapnuté kategorie
-        if(activeCats.length && !activeCats.some(c=>c.key===site.cat)) return false; // mimo výběr
+        if(activeCats.length && !activeCats.includes(site.cat)) return false; // mimo výběr
         if(f.web && !(site.website||site.wikipedia||(USER[site.id]&&USER[site.id].url))) return false; // má info
         if(f.visited && !isVisited(site)) return false;        // jen navštívená
         if(f.fav && !isFav(site)) return false;                // jen oblíbená
@@ -3349,7 +3424,7 @@
       activeTab = tab;                                        // změň aktivní záložku
       updateTabUI();                                          // vzhled: barvy, filtry, legenda
       closeDetail();                                          // zavři případný detail
-      if(sourceMode === 'baked' && bakedData && bakedData.compressed === 'gzip-tabs-base64-v1'){
+      if(sourceMode === 'baked' && isLazyBakedData()){
         // Uvolni předchozí velkou záložku. Zabalená kopie zůstává v bakedData a lze ji znovu rozbalit.
         for(const id in DATA) delete DATA[id];
         for(const id in tabFetchedAt) delete tabFetchedAt[id];
