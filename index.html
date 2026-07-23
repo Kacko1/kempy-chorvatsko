@@ -318,6 +318,11 @@
     .zone-popup .zone-rule{font-size:11.5px;margin:3px 0}
     .zone-popup .zone-note{font-size:10.5px;color:#64748b;margin-top:8px}
     .zone-popup a{color:#0369a1}
+    .popup-detail-btn{
+      cursor:pointer;background:#13252c;color:#e9f1f2;border:1px solid #20363f;
+      border-radius:7px;padding:6px 10px;font-size:12px;margin-top:6px;
+    }
+    .popup-detail-btn:active{background:#1b333d;border-color:var(--sea)}
 
     /* ===== Detailní panel (překryv nad sidebarem / obrazovkou) ===== */
     #detail{
@@ -444,8 +449,8 @@
       }
       #sidebar.open{transform:translateX(0)}                    /* otevřený sidebar */
       #filters{
-        flex:0 1 auto;max-height:min(52%,330px);overflow-y:auto;overscroll-behavior:contain;
-        -webkit-overflow-scrolling:touch;scrollbar-width:thin;
+        flex:1 1 0;min-height:0;max-height:none;overflow-y:auto;overscroll-behavior:contain;
+        -webkit-overflow-scrolling:touch;scrollbar-width:thin;position:relative;z-index:2;
       }
       #filters.mobile-collapsed{flex:0 0 auto;max-height:none;overflow:visible;padding-bottom:8px}
       #filters.mobile-collapsed>:not(#sbmobilehead){display:none!important}
@@ -454,7 +459,11 @@
         display:flex;position:sticky;top:0;z-index:3;background:var(--panel);
         padding-bottom:8px;margin-bottom:8px;
       }
-      #list{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding-bottom:max(8px,env(safe-area-inset-bottom))}
+      #listhead{position:relative;z-index:3;background:var(--panel);box-shadow:0 -1px 0 var(--line)}
+      #list{
+        flex:1 1 0;min-height:0;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
+        padding-bottom:max(8px,env(safe-area-inset-bottom));
+      }
       #brand{display:none}                                      /* na mobilu skryj titulek kvůli místu na záložky */
       #detail{width:100%}                                       /* detail přes celou šířku */
       #status{display:none}                                     /* stav skryjeme kvůli místu */
@@ -2424,26 +2433,53 @@
     });
   }
 
+  function usesTapPopup(){
+    return window.innerWidth<=760
+      || !!(window.matchMedia&&window.matchMedia('(pointer:coarse)').matches);
+  }
+
   function makeSiteMarker(site){
     const selected=site.id===activeId;
     const hovered=!!(hoveredSite&&hoveredSite.id===site.id);
+    const tapPopup=usesTapPopup();
     const m = L.marker([site.lat,site.lon],{
       icon:iconFor(site),
       zIndexOffset:selected ? 1000 : (hovered ? 500 : 0)
     });
-    // Myš zobrazí jen rychlý náhled. Kliknutí (i dotyk) otevře rovnou pravý detail.
-    m.bindPopup(popupHtml(site),{minWidth:210,closeButton:false,autoPan:false});
-    m.on('mouseover',()=>{
-      setHoveredSite(site);
-      m.openPopup();
+    // Na mobilu klepnutí ponechá bublinu s tlačítkem Detail. Myš na počítači
+    // používá rychlý náhled a samotný klik otevře pravý panel rovnou.
+    m.bindPopup(popupHtml(site,tapPopup),{
+      minWidth:210,closeButton:tapPopup,autoPan:tapPopup
     });
-    m.on('mouseout',()=>{
-      setHoveredSite(null);
-      m.closePopup();
-    });
+    if(!tapPopup){
+      m.on('mouseover',()=>{
+        setHoveredSite(site);
+        m.openPopup();
+      });
+      m.on('mouseout',()=>{
+        setHoveredSite(null);
+        m.closePopup();
+      });
+    }
     m.on('click',()=>{
+      if(tapPopup){
+        setActiveSite(site);
+        scheduleViewSave();
+        return;
+      }
       m.closePopup();
       openDetail(site.id);
+    });
+    m.on('popupopen',event=>{
+      const popup=event.popup.getElement();
+      const button=popup&&popup.querySelector('[data-detail]');
+      if(!button) return;
+      button.onclick=clickEvent=>{
+        clickEvent.preventDefault();
+        clickEvent.stopPropagation();
+        m.closePopup();
+        openDetail(site.id);
+      };
     });
     markerById[site.id]=m;
     return m;
@@ -2545,7 +2581,10 @@
   }
 
   // HTML obsahu rychlého popupu nad značkou
-  function popupHtml(site){
+  function popupHtml(site,includeDetail=usesTapPopup()){
+    const detailButton=includeDetail
+      ? '<button type="button" class="popup-detail-btn" data-detail>Detail →</button>'
+      : '';
     if(isPoi()){                                                // POI záložky
       const cat = catLabel(site.cat);                           // název kategorie
       const film = site.film ? '<div style="font-size:11px;margin:4px 0;color:#f43f5e">🎬 filmové místo</div>' : '';
@@ -2554,6 +2593,7 @@
           <div style="font-weight:700;margin-bottom:2px">${esc(site.name)}</div>
           <div style="font-size:11px;color:#667">${esc(site.region)} • ${esc(cat)}</div>
           ${film}
+          ${detailButton}
         </div>`;
     }
     // Kemp (původní)
@@ -2564,6 +2604,7 @@
         <div style="font-weight:700;margin-bottom:2px">${esc(site.name)}</div>
         <div style="font-size:11px;color:#667">${esc(site.region)}${stars}</div>
         <div style="font-size:11px;margin:4px 0">${car}</div>
+        ${detailButton}
       </div>`;
   }
 
@@ -2650,6 +2691,7 @@
         focusSite(id);                                          // přesuň mapu a otevři detail
       };
       node.onmouseenter=()=>{
+        if(usesTapPopup()) return;
         const site=shownSitesById.get(id);
         if(!site) return;
         setHoveredSite(site);
@@ -2657,6 +2699,7 @@
         if(marker) marker.openPopup();
       };
       node.onmouseleave=()=>{
+        if(usesTapPopup()) return;
         const marker=markerById[id]||hoverPreviewMarker;
         if(marker) marker.closePopup();
         if(hoveredSite&&hoveredSite.id===id) setHoveredSite(null);
