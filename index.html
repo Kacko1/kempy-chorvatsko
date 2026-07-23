@@ -2300,11 +2300,13 @@
 
   function makeSiteMarker(site){
     const m = L.marker([site.lat,site.lon],{icon:iconFor(site)});
-    m.bindPopup(popupHtml(site),{minWidth:210});
-    m.on('click',()=>{ activeId=site.id; });
-    m.on('popupopen',e=>{
-      const root=e.popup.getElement(), btn=root&&root.querySelector('[data-detail]');
-      if(btn) btn.onclick=()=>openDetail(site.id);
+    // Myš zobrazí jen rychlý náhled. Kliknutí (i dotyk) otevře rovnou pravý detail.
+    m.bindPopup(popupHtml(site),{minWidth:210,closeButton:false,autoPan:false});
+    m.on('mouseover',()=>m.openPopup());
+    m.on('mouseout',()=>m.closePopup());
+    m.on('click',()=>{
+      m.closePopup();
+      openDetail(site.id);
     });
     markerById[site.id]=m;
     return m;
@@ -2413,7 +2415,6 @@
           <div style="font-weight:700;margin-bottom:2px">${esc(site.name)}</div>
           <div style="font-size:11px;color:#667">${esc(site.region)} • ${esc(cat)}</div>
           ${film}
-          <button data-detail style="cursor:pointer;background:#13252c;color:#e9f1f2;border:1px solid #20363f;border-radius:7px;padding:5px 9px;font-size:12px;margin-top:4px">Detail →</button>
         </div>`;
     }
     // Kemp (původní)
@@ -2424,7 +2425,6 @@
         <div style="font-weight:700;margin-bottom:2px">${esc(site.name)}</div>
         <div style="font-size:11px;color:#667">${esc(site.region)}${stars}</div>
         <div style="font-size:11px;margin:4px 0">${car}</div>
-        <button data-detail style="cursor:pointer;background:#13252c;color:#e9f1f2;border:1px solid #20363f;border-radius:7px;padding:5px 9px;font-size:12px">Detail →</button>
       </div>`;
   }
 
@@ -2503,14 +2503,12 @@
     });
   }
 
-  // Přeletí mapou na kemp, otevře jeho popup a detail
+  // Přeletí mapou na místo a otevře jeho detail
   function focusSite(id){
     const site = ALL.find(s=>s.id===id);                        // najdi kemp podle ID
     if(!site) return;                                           // pojistka
     map.once('moveend',()=>{
       renderVisibleMarkers();
-      const marker=markerById[id];
-      if(marker) marker.openPopup();
     });
     map.flyTo([site.lat, site.lon], 15, {duration:.6});         // plynulý přelet na místo
     openDetail(id);                                             // otevři detailní panel
