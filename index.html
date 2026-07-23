@@ -251,12 +251,12 @@
       filter:drop-shadow(0 0 7px rgba(245,184,65,1));
     }
     .mk-wrap.point-active .mkwrap::after{
-      content:'';position:absolute;inset:-10px;border:3px solid var(--sand);border-radius:50%;
+      content:'';position:absolute;inset:-7px;border:2px solid rgba(245,184,65,.72);border-radius:50%;
       pointer-events:none;animation:selectedPointPulse 1.45s ease-out infinite;
     }
     @keyframes selectedPointPulse{
-      0%{transform:scale(.72);opacity:1}
-      100%{transform:scale(1.28);opacity:0}
+      0%{transform:scale(.8);opacity:.72}
+      100%{transform:scale(1.14);opacity:0}
     }
     .mbadge{
       position:absolute;width:13px;height:13px;border-radius:50%; /* malé kolečko */
@@ -912,6 +912,7 @@
   let lastNominatimAt = 0;      // Nominatim dovoluje nejvýše jeden požadavek za sekundu
   const markerById = {};        // rychlý přístup ke značce podle ID
   const listItemById = {};      // viditelný řádek levého seznamu podle ID
+  let hoverPreviewMarker = null; // dočasný přesný bod, když je místo uvnitř shluku
   let spatialIndex = null;       // index všech vyfiltrovaných bodů pro aktuální záložku
   let spatialSites = [];         // pořadí objektů odpovídající indexům ve spatialIndex
   let visibleRenderFrame = 0;    // sloučení více událostí pohybu mapy do jednoho překreslení
@@ -2162,6 +2163,7 @@
       if(event.layer === cluster){
         pointsEnabled=false; safeSet(POINTS_KEY,false); cluster.clearLayers();
         for(const id in markerById) delete markerById[id];
+        removeHoverPreview();
         return;
       }
       if(event.layer !== zoneOverlay) return;
@@ -2347,8 +2349,29 @@
     }
   }
 
+  function removeHoverPreview(){
+    if(!hoverPreviewMarker) return;
+    hoverPreviewMarker.closePopup();
+    if(map) map.removeLayer(hoverPreviewMarker);
+    hoverPreviewMarker=null;
+  }
+
+  // Pokud Supercluster skrývá daný bod ve shluku, ukaž nad ním dočasnou
+  // neinteraktivní značku. Shluk ani jeho číselný počet se tím nemění.
+  function ensureHoverPreview(){
+    removeHoverPreview();
+    if(!hoveredSite||!map||!pointsEnabled||markerById[hoveredSite.id]) return;
+    hoverPreviewMarker=L.marker([hoveredSite.lat,hoveredSite.lon],{
+      icon:iconFor(hoveredSite),interactive:false,keyboard:false,zIndexOffset:900
+    }).addTo(map);
+    hoverPreviewMarker.bindPopup(popupHtml(hoveredSite),{
+      minWidth:210,closeButton:false,autoPan:false
+    });
+  }
+
   function setHoveredSite(site){
     const previous=hoveredSite&&hoveredSite.id;
+    removeHoverPreview();
     hoveredSite=site||null;
     if(previous) updatePointHighlight(previous,false);
     if(hoveredSite){
@@ -2356,6 +2379,7 @@
       // Překreslení jej do seznamu doplní, aby zvýraznění bylo vždy vidět.
       if(!listItemById[hoveredSite.id]) renderList(FILTERED);
       updatePointHighlight(hoveredSite.id,true);
+      ensureHoverPreview();
     }
   }
 
@@ -2375,7 +2399,10 @@
     for(const id in markerById) delete markerById[id];
     spatialSites = list;
     spatialIndex = null;
-    if(!list.length) return;
+    if(!list.length){
+      removeHoverPreview();
+      return;
+    }
     if(typeof Supercluster === 'undefined'){
       toast('Nelze načíst knihovnu pro rychlé shlukování bodů');
       renderVisibleMarkers();
@@ -2472,6 +2499,7 @@
     if(!pointsEnabled){
       cluster.clearLayers();
       for(const id in markerById) delete markerById[id];
+      removeHoverPreview();
       return;
     }
     const oldZoom=lastRenderedZoom;
@@ -2506,6 +2534,7 @@
       }
     }
     for(const marker of markers) cluster.addLayer(marker);
+    if(hoveredSite) ensureHoverPreview();
     lastRenderedZoom=zoom;
     animateClusterChange(markers,origins,oldZoom,zoom);
   }
@@ -2617,11 +2646,24 @@
     }).join('');                                                // spoj do jednoho řetězce
 
     // Navěš kliknutí na každou položku: otevři detail a přeleť na mapě
+    const shownSitesById=new Map(shown.map(site=>[site.id,site]));
     el.querySelectorAll('.item').forEach(node=>{
       const id = node.getAttribute('data-id');
       listItemById[id]=node;
       node.onclick = ()=>{                                       // reakce na klik
         focusSite(id);                                          // přesuň mapu a otevři detail
+      };
+      node.onmouseenter=()=>{
+        const site=shownSitesById.get(id);
+        if(!site) return;
+        setHoveredSite(site);
+        const marker=markerById[id]||hoverPreviewMarker;
+        if(marker) marker.openPopup();
+      };
+      node.onmouseleave=()=>{
+        const marker=markerById[id]||hoverPreviewMarker;
+        if(marker) marker.closePopup();
+        if(hoveredSite&&hoveredSite.id===id) setHoveredSite(null);
       };
       updatePointHighlight(id,false);
     });
