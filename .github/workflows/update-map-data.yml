@@ -14,8 +14,57 @@ permissions:
   contents: read
 
 jobs:
+  prepare-data-branch:
+    name: Příprava datové větve
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Načtení hlavní větve
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Vytvoření větve data při prvním spuštění
+        shell: bash
+        env:
+          DATA_BRANCH: data
+        run: |
+          if git ls-remote --exit-code --heads origin "refs/heads/$DATA_BRANCH" >/dev/null 2>&1; then
+            echo "Datová větev už existuje."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          export GIT_INDEX_FILE="$RUNNER_TEMP/data-branch-index"
+          rm -f "$GIT_INDEX_FILE"
+          git read-tree --empty
+
+          seed_paths=(
+            cesko_data.json chorvatsko_data.json italie_data.json
+            nemecko_data.json polsko_data.json rakousko_data.json
+            slovensko_data.json slovinsko_data.json svycarsko_data.json
+            map-data
+          )
+          existing_paths=()
+          for item in "${seed_paths[@]}"; do
+            if [[ -e "$item" ]]; then existing_paths+=("$item"); fi
+          done
+          if ((${#existing_paths[@]} > 0)); then
+            git add -- "${existing_paths[@]}"
+          fi
+
+          data_tree=$(git write-tree)
+          data_commit=$(printf '%s\n' "Inicializace aktuálních mapových dat" | git commit-tree "$data_tree")
+          git push origin "$data_commit:refs/heads/$DATA_BRANCH"
+
   build-country:
     name: Zpracování – ${{ matrix.label }}
+    needs: prepare-data-branch
     runs-on: ubuntu-latest
     timeout-minutes: 240
     permissions:
@@ -66,7 +115,7 @@ jobs:
       - name: Načtení repozitáře
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Node.js
         uses: actions/setup-node@v6
@@ -95,88 +144,151 @@ jobs:
           DATA_FILE: ${{ matrix.file }}
           DATA_DIR: ${{ matrix.data_dir }}
           COUNTRY_LABEL: ${{ matrix.label }}
-          TARGET_BRANCH: ${{ github.ref_name }}
+          COUNTRY_ID: ${{ matrix.country }}
+          DATA_BRANCH: data
         run: |
-          if [[ -z "$(git status --porcelain -- "$DATA_FILE" "$DATA_DIR")" ]]; then
-            echo "$COUNTRY_LABEL: data se nezměnila."
-            exit 0
+          if [[ ! -f "$DATA_FILE" || ! -d "$DATA_DIR" ]]; then
+            echo "$COUNTRY_LABEL: generátor nevytvořil kompletní výsledek."
+            exit 1
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- "$DATA_FILE" "$DATA_DIR"
-          git commit -m "Automatická aktualizace: $COUNTRY_LABEL"
 
-          for attempt in 1 2 3 4 5; do
-            git fetch origin "$TARGET_BRANCH"
-            if ! git rebase "origin/$TARGET_BRANCH"; then
-              git rebase --abort || true
-              echo "$COUNTRY_LABEL: změnu nelze bezpečně sloučit s aktuální větví."
-              exit 1
-            fi
-            if git push origin "HEAD:$TARGET_BRANCH"; then
-              echo "$COUNTRY_LABEL: manifest i gzip části byly uloženy do repozitáře."
+          for attempt in 1 2 3 4 5 6 7 8; do
+            git fetch --no-tags --filter=blob:none origin \
+              "+refs/heads/$DATA_BRANCH:refs/remotes/origin/$DATA_BRANCH"
+
+            export GIT_INDEX_FILE="$RUNNER_TEMP/data-index-$COUNTRY_ID"
+            rm -f "$GIT_INDEX_FILE"
+            git read-tree "origin/$DATA_BRANCH"
+            git add -- "$DATA_FILE" "$DATA_DIR"
+
+            data_tree=$(git write-tree)
+            data_parent=$(git rev-parse "origin/$DATA_BRANCH")
+            data_commit=$(printf '%s\n' "Aktualizace dat: $COUNTRY_LABEL" \
+              | git commit-tree "$data_tree" -p "$data_parent")
+
+            if git push origin "$data_commit:refs/heads/$DATA_BRANCH"; then
+              echo "$COUNTRY_LABEL: manifest i gzip části jsou bezpečně ve větvi $DATA_BRANCH."
               exit 0
             fi
-            echo "$COUNTRY_LABEL: souběžný push, opakuji pokus $attempt/5."
+            echo "$COUNTRY_LABEL: jiná země právě aktualizovala datovou větev, opakuji pokus $attempt/8."
             sleep $((attempt * 5))
           done
 
-          echo "$COUNTRY_LABEL: data se nepodařilo pushnout ani po pěti pokusech."
+          echo "$COUNTRY_LABEL: data se nepodařilo uložit ani po osmi pokusech."
           exit 1
 
-      # Artefakt je záloha pro závěrečný krok. Vytvoří se i tehdy, když se
-      # okamžitý push nepodařil, ale samotné zpracování země bylo úspěšné.
-      - name: Předání výsledku jako zálohy
-        if: ${{ always() && steps.generate.outcome == 'success' }}
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: map-data-${{ matrix.country }}
-          path: |
-            ${{ matrix.file }}
-            ${{ matrix.data_dir }}/
-          if-no-files-found: error
-          retention-days: 1
-
-  update-data:
-    name: Kontrola a uložení zbývajících výsledků
+  squash-data-history:
+    name: Zachování pouze aktuální datové sady
     needs: build-country
-    # Selhání jedné země nesmí zahodit data ostatních. Při ručním zrušení
-    # běhu ale nedokončené výsledky záměrně neukládáme.
-    if: ${{ !cancelled() }}
+    # Každá úspěšná země už je ve větvi data. I při selhání jiné země proto
+    # pouze odstraníme rodiče commitů a zachováme aktuální výsledný strom.
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Načtení pracovního repozitáře
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+
+      - name: Sloučení historie datové větve na jeden stav
+        shell: bash
+        env:
+          DATA_BRANCH: data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags --filter=blob:none origin \
+            "+refs/heads/$DATA_BRANCH:refs/remotes/origin/$DATA_BRANCH"
+
+          data_parent=$(git rev-parse "origin/$DATA_BRANCH")
+          data_tree=$(git rev-parse "origin/$DATA_BRANCH^{tree}")
+          data_commit=$(printf '%s\n' "Aktuální mapová data $(date -u +%Y-%m-%d)" \
+            | git commit-tree "$data_tree")
+
+          git push \
+            --force-with-lease="refs/heads/$DATA_BRANCH:$data_parent" \
+            origin "$data_commit:refs/heads/$DATA_BRANCH"
+          echo "Datová větev obsahuje jediný aktuální stav bez starých gzip verzí."
+
+  cleanup-main-data:
+    name: Odstranění datových kopií z hlavní větve
+    needs: [build-country, squash-data-history]
+    if: ${{ always() && !cancelled() && needs.build-country.result == 'success' && needs.squash-data-history.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: write
 
     steps:
-      - name: Načtení repozitáře
+      - name: Načtení hlavní větve
         uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Stažení výsledků úspěšných zemí
-        uses: actions/download-artifact@v8
-        with:
-          pattern: map-data-*
-          path: .
-          merge-multiple: true
-
-      - name: Uložení změněných datových souborů
+      - name: Kontrola úplnosti datové větve
         shell: bash
+        env:
+          DATA_BRANCH: data
         run: |
-          if [[ -z "$(git status --porcelain -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json slovinsko_data.json svycarsko_data.json map-data)" ]]; then
-            echo "Datové soubory se nezměnily."
+          git fetch --no-tags --filter=blob:none origin \
+            "+refs/heads/$DATA_BRANCH:refs/remotes/origin/$DATA_BRANCH"
+          required_paths=(
+            cesko_data.json chorvatsko_data.json italie_data.json
+            nemecko_data.json polsko_data.json rakousko_data.json
+            slovensko_data.json slovinsko_data.json svycarsko_data.json
+            map-data/cesko map-data/chorvatsko map-data/italie
+            map-data/nemecko map-data/polsko map-data/rakousko
+            map-data/slovensko map-data/slovinsko map-data/svycarsko
+          )
+          for item in "${required_paths[@]}"; do
+            if ! git cat-file -e "origin/$DATA_BRANCH:$item"; then
+              echo "Datová větev není úplná, v hlavní větvi proto nic nemažu: $item"
+              exit 1
+            fi
+          done
+          echo "Datová větev obsahuje všech devět zemí."
+
+      - name: Uvolnění hlavní větve od velkých dat
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r --ignore-unmatch -- map-data
+          git rm --ignore-unmatch -- \
+            cesko_data.json chorvatsko_data.json italie_data.json \
+            nemecko_data.json polsko_data.json rakousko_data.json \
+            slovensko_data.json slovinsko_data.json svycarsko_data.json
+
+          if git diff --cached --quiet; then
+            echo "Hlavní větev už neobsahuje velké datové soubory."
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json slovinsko_data.json svycarsko_data.json map-data
-          echo "Ukládám tyto změněné datové soubory:"
-          git status --short -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json svycarsko_data.json map-data
+          git commit -m "Přesun aktuálních mapových dat do větve data"
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$TARGET_BRANCH"
+            if ! git rebase "origin/$TARGET_BRANCH"; then
+              git rebase --abort || true
+              echo "Úklid hlavní větve nelze bezpečně sloučit."
+              exit 1
+            fi
+            if git push origin "HEAD:$TARGET_BRANCH"; then
+              echo "Hlavní větev je malá; web načítá aktuální data z větve data."
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
 
-          git commit -m "Automatická aktualizace dostupných mapových dat"
-          git push
+          echo "Úklid hlavní větve se nepodařilo uložit."
+          exit 1
