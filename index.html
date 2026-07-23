@@ -383,8 +383,9 @@
     /* Fotka v detailu (z Wikimedia/Wikidata) */
     .photo{margin-bottom:14px}                                  /* odsazení pod fotkou */
     .photo img{width:100%;border-radius:10px;display:block;max-height:220px;object-fit:cover;background:var(--panel-2)} /* náhled */
-    .photo .photo-cap{display:block;font-size:10.5px;color:var(--muted);margin-top:4px;text-decoration:none} /* popisek/zdroj */
-    .photo .photo-cap:hover{color:var(--ink)}                  /* najetí */
+    .photo .photo-cap{display:block;font-size:10.5px;line-height:1.45;color:var(--muted);margin-top:5px} /* zdroj, autor a licence */
+    .photo .photo-cap a{color:inherit;text-decoration:underline;text-decoration-color:rgba(148,163,184,.45)}
+    .photo .photo-cap a:hover{color:var(--ink)}                /* najetí */
 
     /* ===== Stavová hlášení (načítání / chyba) ===== */
     #overlay{
@@ -3465,34 +3466,178 @@
      ========================================================================= */
 
   const photoCache = {};        // cache výsledků na relaci (i null = „zkusili jsme, nic")
+  const COMMONS_API = 'https://commons.wikimedia.org/w/api.php';
 
-  // Náhled souboru z Wikimedia Commons v dané šířce (funguje jako <img src>, bez API)
-  function commonsThumb(filename, width){
-    return 'https://commons.wikimedia.org/wiki/Special:FilePath/'
-      + encodeURIComponent(filename.replace(/^File:/i,'').replace(/ /g,'_')) + '?width=' + width;
+  // API někdy vrací autora jako krátké HTML. Do aplikace z něj vložíme pouze bezpečný text.
+  function wikiMetaText(value){
+    if(!value) return '';
+    const el = document.createElement('div');
+    el.innerHTML = String(value);
+    return (el.textContent || '').replace(/\s+/g,' ').trim();
   }
+
+  // Do atributů href/src pustíme jen webové adresy. Staré http odkazy převedeme na https.
+  function safePhotoUrl(value){
+    try{
+      const url = new URL(String(value || ''), 'https://commons.wikimedia.org/');
+      if(url.protocol === 'http:') url.protocol = 'https:';
+      return url.protocol === 'https:' ? url.href : null;
+    }catch(e){ return null; }
+  }
+
+  function shortPhotoText(value, max=150){
+    const text = String(value || '').replace(/\s+/g,' ').trim();
+    return text.length > max ? text.slice(0,max-1).trim()+'…' : text;
+  }
+
+  function cleanFileTitle(title){
+    return String(title || '').replace(/^File:/i,'').replace(/_/g,' ');
+  }
+
+  // Převede imageinfo z MediaWiki API na společný formát včetně povinných licenčních údajů.
+  function photoFromImagePage(page, source, nearbyDistance=null){
+    const info = page && page.imageinfo && page.imageinfo[0];
+    if(!info) return null;
+    const meta = info.extmetadata || {};
+    const url = safePhotoUrl(info.thumburl || info.url);
+    const link = safePhotoUrl(info.descriptionurl);
+    if(!url || !link) return null;
+    const author = shortPhotoText(wikiMetaText((meta.Artist && meta.Artist.value) || (meta.Credit && meta.Credit.value)),180);
+    const license = shortPhotoText(wikiMetaText((meta.LicenseShortName && meta.LicenseShortName.value) || (meta.UsageTerms && meta.UsageTerms.value)),80);
+    return {
+      url,
+      link,
+      caption:shortPhotoText(cleanFileTitle(page.title),120),
+      source:source || 'Wikimedia Commons',
+      author:author || 'neuveden u zdroje',
+      license:license || 'neuvedena u zdroje',
+      licenseUrl:safePhotoUrl(meta.LicenseUrl && meta.LicenseUrl.value),
+      nearbyDistance:Number.isFinite(nearbyDistance) ? nearbyDistance : null
+    };
+  }
+
+  // Načte náhled, autora a licenci konkrétního souboru. Funguje i pro obrázky Wikipedie.
+  async function wikiFilePhoto(api, filename, source){
+    const params = new URLSearchParams({
+      action:'query',format:'json',origin:'*',redirects:'1',
+      titles:/^File:/i.test(filename) ? filename : 'File:'+filename,
+      prop:'imageinfo',iiprop:'url|mime|mediatype|extmetadata',
+      iiurlwidth:'600',iiextmetadatalanguage:'cs'
+    });
+    const r = await fetch(api+'?'+params);
+    if(!r.ok) throw new Error('MediaWiki HTTP '+r.status);
+    const j = await r.json();
+    const page = Object.values((j.query && j.query.pages) || {}).find(p=>p.imageinfo);
+    return photoFromImagePage(page,source);
+  }
+
+  function commonsFilePhoto(filename){
+    return wikiFilePhoto(COMMONS_API,filename,'Wikimedia Commons');
+  }
+
   // Získá název obrázku (P18) z Wikidata záznamu
   async function wikidataImage(qid){
     const r = await fetch('https://www.wikidata.org/wiki/Special:EntityData/'+qid+'.json'); // JSON záznamu
+    if(!r.ok) throw new Error('Wikidata HTTP '+r.status);
     const j = await r.json();                                   // rozparsuj
     const ent = j.entities && j.entities[qid];                  // entita
     const p18 = ent && ent.claims && ent.claims.P18 && ent.claims.P18[0]; // vlastnost „obrázek"
-    return p18 ? p18.mainsnak.datavalue.value : null;           // název souboru nebo null
+    return p18 && p18.mainsnak && p18.mainsnak.datavalue ? p18.mainsnak.datavalue.value : null; // název souboru
   }
-  // Získá náhledovou fotku z Wikipedie (REST summary)
-  async function wikipediaThumb(wp){
-    const i = wp.indexOf(':'); const lang = wp.slice(0,i); const title = wp.slice(i+1); // jazyk + název
-    const r = await fetch('https://'+lang+'.wikipedia.org/api/rest_v1/page/summary/'+encodeURIComponent(title.replace(/ /g,'_')));
-    const j = await r.json();                                   // rozparsuj
-    return (j.thumbnail && j.thumbnail.source) || null;         // URL náhledu nebo null
+
+  // Získá hlavní soubor článku a jeho licenci přímo z MediaWiki API dané Wikipedie.
+  async function wikipediaPhoto(wp){
+    const i = wp.indexOf(':');
+    const lang = i>0 ? wp.slice(0,i).toLowerCase() : 'en';
+    const title = i>0 ? wp.slice(i+1) : wp;
+    if(!/^[a-z0-9-]{2,20}$/.test(lang) || !title) return null;
+    const api = 'https://'+lang+'.wikipedia.org/w/api.php';
+    const params = new URLSearchParams({
+      action:'query',format:'json',origin:'*',redirects:'1',
+      titles:title,prop:'pageimages',piprop:'name'
+    });
+    const r = await fetch(api+'?'+params);
+    if(!r.ok) throw new Error('Wikipedia HTTP '+r.status);
+    const j = await r.json();
+    const page = Object.values((j.query && j.query.pages) || {}).find(p=>p.pageimage);
+    return page ? wikiFilePhoto(api,page.pageimage,'Wikipedie / Wikimedia Commons') : null;
   }
+
   // Získá první obrázek z kategorie na Commons (když wikimedia_commons míří na Category:)
   async function commonsFirstInCategory(cat){
     const r = await fetch('https://commons.wikimedia.org/w/api.php?action=query&list=categorymembers&cmtitle='
       + encodeURIComponent(cat) + '&cmtype=file&cmlimit=1&format=json&origin=*');
+    if(!r.ok) throw new Error('Wikimedia Commons HTTP '+r.status);
     const j = await r.json();                                   // rozparsuj
     const m = j.query && j.query.categorymembers && j.query.categorymembers[0]; // první soubor
     return m ? m.title : null;                                  // „File:…" nebo null
+  }
+
+  // Obecná slova nepomáhají určit, zda fotografie opravdu patří danému objektu.
+  const PHOTO_STOP_WORDS = new Set([
+    'camp','camping','campsite','campground','autocamp','autokamp','kemp',
+    'hotel','hostel','motel','pension','restaurant','restaurace','restaurante',
+    'parking','parkplatz','beach','plaza','plage','apartman','apartmani','apartments',
+    'the','and','und','der','die','das','des','den','von','van','la','le','les','de','del','di'
+  ]);
+
+  function normalizedPhotoText(value){
+    return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+      .toLowerCase().replace(/^file:/,'').replace(/\.[a-z0-9]{2,5}$/,'')
+      .replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+  }
+
+  function distinctivePhotoWords(value){
+    return [...new Set(normalizedPhotoText(value).split(/\s+/)
+      .filter(word=>word.length>=3 && !PHOTO_STOP_WORDS.has(word)))];
+  }
+
+  // Bezpečný záložní pokus: soubor musí být blízko souřadnic a zároveň se jeho název
+  // musí dostatečně shodovat s názvem objektu. Samotná blízkost nikdy nestačí.
+  async function nearbyCommonsPhoto(site){
+    const lat=+site.lat, lon=+site.lon;
+    if(!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const wantedWords = distinctivePhotoWords(site.name);
+    if(!wantedWords.length) return null;
+    const wantedPhrase = wantedWords.join(' ');
+    const radius = 400;
+    const params = new URLSearchParams({
+      action:'query',format:'json',origin:'*',
+      generator:'geosearch',ggsprimary:'all',ggsnamespace:'6',
+      ggscoord:lat+'|'+lon,ggsradius:String(radius),ggslimit:'30',
+      prop:'coordinates|imageinfo',iiprop:'url|mime|mediatype|extmetadata',
+      iiurlwidth:'600',iiextmetadatalanguage:'cs'
+    });
+    const r = await fetch(COMMONS_API+'?'+params);
+    if(!r.ok) throw new Error('Wikimedia Geosearch HTTP '+r.status);
+    const j = await r.json();
+    const pages = Object.values((j.query && j.query.pages) || {});
+    let best = null, bestScore = -Infinity;
+    for(const page of pages){
+      const coord = page.coordinates && page.coordinates[0];
+      if(!coord || !page.imageinfo) continue;
+      const distance = haversine(lat,lon,+coord.lat,+coord.lon);
+      if(!Number.isFinite(distance) || distance>radius) continue;
+      const candidateText = normalizedPhotoText(page.title);
+      const candidateWords = new Set(distinctivePhotoWords(page.title));
+      const sharedWords = wantedWords.filter(word=>candidateWords.has(word));
+      const coverage = sharedWords.length / wantedWords.length;
+      const hasStrongWord = sharedWords.some(word=>word.length>=4);
+      const phraseMatch = wantedPhrase.length>=4 && candidateText.includes(wantedPhrase);
+      const nameMatches = phraseMatch
+        || (coverage===1 && hasStrongWord)
+        || (sharedWords.length>=2 && coverage>=0.67 && hasStrongWord);
+      if(!nameMatches) continue;
+      const score = coverage*10 + (phraseMatch?6:0) + Math.max(0,3-distance/radius*3);
+      if(score<=bestScore) continue;
+      const photo = photoFromImagePage(page,'Wikimedia Commons',distance);
+      if(photo){ best=photo; bestScore=score; }
+    }
+    return best;
+  }
+
+  async function tryPhoto(task){
+    try{ return await task(); }catch(e){ return null; }
   }
 
   // Vyřeší fotku pro daný objekt (zkouší zdroje v pořadí dle kvality vazby)
@@ -3504,33 +3649,54 @@
     const wp = t.wikipedia || site.wikipedia;                   // Wikipedie
     const img = t.image || site.image;                          // přímý obrázek
     let result = null;                                          // výsledek
-    try{
-      // 1) wikimedia_commons — konkrétní soubor nebo kategorie
-      if(commons){
-        if(/^File:/i.test(commons)){
-          result = { url:commonsThumb(commons,600), caption:commons.replace(/^File:/i,''), link:'https://commons.wikimedia.org/wiki/'+encodeURIComponent(commons) };
-        }else if(/^Category:/i.test(commons)){
-          const file = await commonsFirstInCategory(commons);   // vytáhni první soubor z kategorie
-          if(file) result = { url:commonsThumb(file,600), caption:file.replace(/^File:/i,''), link:'https://commons.wikimedia.org/wiki/'+encodeURIComponent(commons) };
-        }
+    // 1) wikimedia_commons — konkrétní soubor nebo kategorie
+    if(commons){
+      if(/^File:/i.test(commons)){
+        result = await tryPhoto(()=>commonsFilePhoto(commons));
+      }else if(/^Category:/i.test(commons)){
+        const file = await tryPhoto(()=>commonsFirstInCategory(commons)); // vytáhni první soubor z kategorie
+        if(file) result = await tryPhoto(()=>commonsFilePhoto(file));
       }
-      // 2) wikidata → obrázek P18
-      if(!result && wd && /^Q\d+$/.test(wd)){
-        const file = await wikidataImage(wd);
-        if(file) result = { url:commonsThumb(file,600), caption:file, link:'https://www.wikidata.org/wiki/'+wd };
-      }
-      // 3) wikipedia → náhled článku
-      if(!result && wp && wp.includes(':')){
-        const thumb = await wikipediaThumb(wp);
-        if(thumb) result = { url:thumb, caption:'Wikipedia', link:wikipediaUrl(wp) };
-      }
-      // 4) přímý odkaz na obrázek (jen https)
-      if(!result && img && /^https:\/\//i.test(img)){
-        result = { url:img, caption:'Foto', link:img };
-      }
-    }catch(e){ result = null; }                                 // při chybě nic
+    }
+    // 2) wikidata → obrázek P18 → metadata souboru na Commons
+    if(!result && wd && /^Q\d+$/.test(wd)){
+      const file = await tryPhoto(()=>wikidataImage(wd));
+      if(file) result = await tryPhoto(()=>commonsFilePhoto(file));
+    }
+    // 3) wikipedia → hlavní obrázek článku včetně autora a licence
+    if(!result && wp && wp.includes(':')){
+      result = await tryPhoto(()=>wikipediaPhoto(wp));
+    }
+    // 4) přímý odkaz z OSM. U cizího serveru nelze licenci automaticky zjistit,
+    // proto se tato skutečnost pravdivě zobrazí pod fotografií.
+    if(!result && img && /^https:\/\//i.test(img)){
+      result = {
+        url:safePhotoUrl(img),link:safePhotoUrl(img),caption:'Fotografie z odkazu v OpenStreetMap',
+        source:'externí zdroj',author:'',license:'licence neuvedena'
+      };
+      if(!result.url || !result.link) result=null;
+    }
+    // 5) nová záloha: Wikimedia Commons podle názvu i souřadnic
+    if(!result) result = await tryPhoto(()=>nearbyCommonsPhoto(site));
     photoCache[site.id] = result;                               // ulož (i null)
     return result;                                              // vrať
+  }
+
+  function photoCreditHtml(photo){
+    const sourceLabel = shortPhotoText(photo.source || 'Zdroj fotografie',80);
+    let html = '<a href="'+esc(photo.link)+'" target="_blank" rel="noopener">'
+      + esc(photo.caption || sourceLabel)+'</a> · '+esc(sourceLabel);
+    if(photo.author) html += '<br>Autor: '+esc(photo.author);
+    if(photo.license){
+      html += ' · Licence: ';
+      html += photo.licenseUrl
+        ? '<a href="'+esc(photo.licenseUrl)+'" target="_blank" rel="noopener">'+esc(photo.license)+'</a>'
+        : esc(photo.license);
+    }
+    if(photo.nearbyDistance!=null){
+      html += '<br>Nalezeno podle názvu a polohy ('+Math.round(photo.nearbyDistance)+' m od bodu)';
+    }
+    return html;
   }
 
   // Naplní box s fotkou v detailu (asynchronně; když fotka není, box skryje)
@@ -3542,8 +3708,8 @@
     if(!p || document.getElementById('photoBox') !== box) return; // nic / detail se mezitím změnil
     if(activeId !== site.id) return;                           // uživatel už otevřel jiný objekt
     // Vlož fotku + popisek se zdrojem; při chybě načtení se box skryje
-    box.innerHTML = '<img src="'+p.url+'" alt="" loading="lazy" onerror="this.parentElement.style.display=\'none\'">'
-      + '<a class="photo-cap" href="'+p.link+'" target="_blank" rel="noopener">'+esc(p.caption)+' · Wikimedia / Wikidata</a>';
+    box.innerHTML = '<img src="'+esc(p.url)+'" alt="" loading="lazy" onerror="this.parentElement.style.display=\'none\'">'
+      + '<div class="photo-cap">'+photoCreditHtml(p)+'</div>';
     box.style.display = 'block';                               // zobraz
   }
 
