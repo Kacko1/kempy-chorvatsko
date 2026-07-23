@@ -699,6 +699,9 @@
   const SIDEBAR_KEY = 'travel_map_sidebar_collapsed_v1'; // sbalení levého panelu na počítači
   const BACKUP_FORMAT = 'cestovni-mapa-backup';
   const BACKUP_VERSION = 1;
+  // Aktuální velké datové soubory jsou v samostatné větvi s jediným stavem.
+  // Hlavní větev díky tomu při každé automatické aktualizaci nenabírá stovky MB historie.
+  const DATA_BRANCH_BASE = 'https://raw.githubusercontent.com/Kacko1/kempy-chorvatsko/data/';
   function countryCfg(){ return COUNTRIES[activeCountry]; }
   function userKey(code=activeCountry){ return 'travel_map_user_'+code+'_v1'; }
   function cacheKey(tabId){
@@ -936,6 +939,8 @@
   const tabFetchedAt = {};      // čas stažení dat pro každou záložku
   let bakedData = null;         // data načtená z přibaleného souboru (nebo null)
   let bakedLoadError = null;    // případná chyba souboru nebo nepodporované komprese
+  let bakedManifestBaseUrl = null; // základ URL pro gzip části stejného manifestu
+  let bakedManifestIsRemote = false; // vzdálená větev data; při chybě lze zkusit místní kopii
   let sourceMode = 'baked';     // výchozí je offline; 'live' = stahování z Overpassu
   let exportController = null;  // AbortController pro rušení exportu
   let exportCancelled = false;  // příznak zrušení exportu
@@ -1656,22 +1661,64 @@
     const version=String((bakedData&&bakedData.version)
       || (bakedData&&bakedData._meta&&bakedData._meta.generatedAt)
       || '1');
-    const separator=part.file.includes('?') ? '&' : '?';
-    const url=part.file+separator+'v='+encodeURIComponent(version);
-    // Verze v URL se změní při každé automatické aktualizaci. Stejnou část
-    // proto může prohlížeč bezpečně načíst z cache, nová se stáhne sama.
-    const response=await fetch(url,{cache:'force-cache'});
-    if(!response.ok) throw new Error('Datová část není dostupná: '+part.file);
-    return parseGzipResponse(response);
+    const remoteBase=bakedManifestBaseUrl || document.baseURI;
+    const candidates=[new URL(part.file,remoteBase).href];
+    // Během prvního převodu na datovou větev může na GitHubu krátce chybět
+    // vzdálená část. Dokud je místní kopie v hlavní větvi, poslouží jako záloha.
+    if(bakedManifestIsRemote){
+      const localUrl=new URL(part.file,document.baseURI).href;
+      if(localUrl!==candidates[0]) candidates.push(localUrl);
+    }
+    let lastError=null;
+    for(const candidate of candidates){
+      try{
+        const separator=candidate.includes('?') ? '&' : '?';
+        const url=candidate+separator+'v='+encodeURIComponent(version);
+        // Verze v URL se změní při každé automatické aktualizaci. Stejnou část
+        // proto může prohlížeč bezpečně načíst z cache, nová se stáhne sama.
+        const response=await fetch(url,{cache:'force-cache'});
+        if(!response.ok) throw new Error('HTTP '+response.status);
+        return await parseGzipResponse(response);
+      }catch(error){
+        lastError=error;
+      }
+    }
+    throw new Error('Datová část není dostupná: '+part.file+(lastError ? ' ('+lastError.message+')' : ''));
   }
 
   // Při startu zkus načíst přibalený datový soubor (jen ho připraví, nenaplní hned data)
   async function loadBaked(){
     bakedData = null;
     bakedLoadError = null;
+    bakedManifestBaseUrl = null;
+    bakedManifestIsRemote = false;
     try{
-      const r = await fetch(bakedFilename(), {cache:'no-cache'}); // soubor vybrané země vedle appky
-      if(!r.ok) return false;                                  // soubor pro zemi není
+      const remoteManifest=new URL(bakedFilename(),DATA_BRANCH_BASE).href;
+      const localManifest=new URL(bakedFilename(),document.baseURI).href;
+      const candidates=[remoteManifest];
+      if(localManifest!==remoteManifest) candidates.push(localManifest);
+      let r=null;
+      let manifestUrl=null;
+      let lastError=null;
+      // Datová větev je hlavní zdroj. Místní manifest zachová funkčnost při
+      // prvním nasazení nebo při krátkém výpadku raw.githubusercontent.com.
+      for(const candidate of candidates){
+        try{
+          const response=await fetch(candidate,{cache:'no-cache'});
+          if(!response.ok) throw new Error('HTTP '+response.status);
+          r=response;
+          manifestUrl=candidate;
+          break;
+        }catch(error){
+          lastError=error;
+        }
+      }
+      if(!r){
+        if(lastError) throw lastError;
+        return false;
+      }
+      bakedManifestBaseUrl=new URL('.',manifestUrl).href;
+      bakedManifestIsRemote=manifestUrl===remoteManifest;
       let obj = await r.json();                                // načti JSON
       if(obj && obj.compressed === 'gzip-tab-files-v1'){
         // Manifest je malý; gzip soubor aktivní záložky se stáhne až níže.
