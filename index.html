@@ -264,13 +264,15 @@
     .mbadge.bfav{top:-6px;right:-6px;color:#a16207;border:1.5px solid #f59e0b} /* ★ oblíbené = žlutá */
     .mbadge.bvis{bottom:-6px;right:-6px;color:#15803d;border:1.5px solid #22c55e} /* ✓ navštíveno = zelená */
 
-    /* Tlačítko „Moje poloha" v mapě (řadí se pod ovládání zoomu) */
-    .locate-ctl a{
+    /* Tlačítka „Moje poloha" a „Sledovat polohu" v mapě */
+    .locate-ctl a,.follow-ctl a{
       display:flex;align-items:center;justify-content:center; /* vycentruj ikonu */
       width:30px;height:30px;font-size:15px;                  /* rozměr shodný s tlačítky Leafletu */
       background:#fff;color:#333;                             /* světlé pozadí jako ostatní ovládání */
     }
-    .locate-ctl.active a{background:var(--sea)}               /* zapnuto = teal pozadí */
+    .locate-ctl.active a,.follow-ctl.active a{
+      background:var(--sea);color:#04231f;                    /* zapnuto = teal pozadí */
+    }
     /* Značka mojí polohy ve stylu Google Map: modré jádro + bílý prstenec + pulzující svatozář */
     .loc-wrap{position:relative;width:22px;height:22px}          /* obal značky */
     .loc-core{
@@ -2406,6 +2408,12 @@
   let locMarker = null;        // značka mojí polohy (modrá tečka)
   let locCircle = null;        // kruh přesnosti kolem tečky
   let locateEl = null;         // DOM tlačítka (kvůli zvýraznění aktivního stavu)
+  let followEl = null;         // tlačítko, které drží polohu uprostřed mapy
+  let followingLocation = false; // má se mapa průběžně centrovat na polohu?
+  let locRefreshTimer = 0;     // každých 5 s požádá prohlížeč o čerstvou polohu
+  let locRefreshPending = false; // nepouštěj dva GPS dotazy současně
+  let locSession = 0;          // odliší opožděnou odpověď po vypnutí/restartu
+  let lastLocationErrorAt = 0; // omezení opakovaných hlášek při ztrátě signálu
   let userLoc = null;          // moje poslední známá poloha {lat, lon} (pro vzdálenosti)
   let lastAppliedLoc = null;   // poloha, se kterou se naposledy přepočítal seznam
 
@@ -2427,8 +2435,36 @@
     });
     map.addControl(new Ctl());                                  // přidej tlačítko na mapu
 
+    // Druhé tlačítko zapíná centrování mapy na každý nový GPS údaj.
+    const FollowCtl = L.Control.extend({
+      options:{position:'topleft'},
+      onAdd:function(){
+        const box=L.DomUtil.create('div','leaflet-bar follow-ctl');
+        const a=L.DomUtil.create('a','',box);
+        a.href='#';
+        a.title='Sledovat polohu – držet tečku uprostřed mapy';
+        a.setAttribute('aria-label',a.title);
+        a.innerHTML='🎯';
+        L.DomEvent.on(a,'click',L.DomEvent.stop)
+          .on(a,'click',toggleFollowLocation);
+        followEl=box;
+        return box;
+      }
+    });
+    map.addControl(new FollowCtl());
+
+    // Ruční posun mapy znamená, že se uživatel chce podívat jinam.
+    // GPS zůstane zapnuté, vypne se pouze automatické centrování.
+    map.on('dragstart',()=>{
+      if(!followingLocation) return;
+      followingLocation=false;
+      if(followEl) followEl.classList.remove('active');
+    });
+
     // Když Leaflet najde polohu, aktualizuj tečku i kruh přesnosti
     map.on('locationfound', e=>{
+      if(!locating) return;                                     // opožděný údaj po vypnutí ignoruj
+      lastLocationErrorAt=0;
       const r = e.accuracy || 0;                                // přesnost v metrech
       if(!locMarker){                                           // tečka ještě není → vytvoř ji
         locMarker = L.marker(e.latlng, {icon:locIcon(), zIndexOffset:1000}).addTo(map); // nad ostatními
@@ -2440,7 +2476,11 @@
       }else{
         locCircle.setLatLng(e.latlng); locCircle.setRadius(r);  // jinak posuň a přenastav poloměr
       }
-      if(locFirstFix){                                          // při prvním zaměření přeleť na polohu
+      if(followingLocation){                                    // aktivní sledování = tečka stále uprostřed
+        if(locFirstFix) map.flyTo(e.latlng,Math.max(map.getZoom(),14),{duration:.45});
+        else map.panTo(e.latlng,{animate:true,duration:.35});
+        locFirstFix=false;
+      }else if(locFirstFix){                                    // při prvním zaměření přeleť na polohu
         map.flyTo(e.latlng, Math.max(map.getZoom(), 14), {duration:.6}); // přiblížení na mě
         locFirstFix = false;                                    // příště už nepřelétávej (ať se dá mapa posouvat)
       }
@@ -2456,10 +2496,22 @@
       }
     });
 
-    // Když se poloha nepodaří získat, vypni sledování a upozorni
-    map.on('locationerror', ()=>{
-      stopLocate();                                             // ukliď stav
-      toast('Polohu se nepodařilo získat — povol přístup k poloze a otevři appku přes https.'); // rada
+    // Dočasná ztráta GPS nesmí odstranit poslední známou polohu. Sledování
+    // vypneme jen tehdy, když uživatel přístup hned na začátku výslovně zakáže.
+    map.on('locationerror', event=>{
+      if(!locating) return;
+      if(event&&event.code===1&&!userLoc){
+        toast('Přístup k poloze byl zamítnut — povol ho v nastavení prohlížeče.');
+        stopLocate();
+        return;
+      }
+      const now=Date.now();
+      if(now-lastLocationErrorAt>30000){
+        lastLocationErrorAt=now;
+        toast(userLoc
+          ? 'GPS signál je dočasně nedostupný — ponechávám poslední známou polohu.'
+          : 'Čekám na GPS signál…');
+      }
     });
   }
 
@@ -2467,20 +2519,70 @@
   function toggleLocate(){
     if(locating) stopLocate(); else startLocate();              // podle stavu přepni
   }
+
+  // Přepne průběžné centrování mapy na modrou tečku.
+  function toggleFollowLocation(){
+    followingLocation=!followingLocation;
+    if(followEl) followEl.classList.toggle('active',followingLocation);
+    if(!followingLocation) return;
+    if(!locating) startLocate();
+    if(userLoc){
+      map.panTo([userLoc.lat,userLoc.lon],{animate:true,duration:.35});
+      renderVisibleMarkers();                                  // okolní objekty odpovídají novému výřezu
+    }
+  }
+
+  // watchPosition dodává změny průběžně. Tento doplňkový dotaz každých pět
+  // sekund povzbudí mobilní prohlížeč k čerstvému údaji, pokud je stránka aktivní.
+  function requestLocationRefresh(){
+    if(!locating||locRefreshPending||document.hidden||!navigator.geolocation) return;
+    locRefreshPending=true;
+    const session=locSession;
+    navigator.geolocation.getCurrentPosition(position=>{
+      if(session!==locSession) return;
+      locRefreshPending=false;
+      if(!locating) return;
+      map.fire('locationfound',{
+        latlng:L.latLng(position.coords.latitude,position.coords.longitude),
+        accuracy:position.coords.accuracy||0,
+        timestamp:position.timestamp
+      });
+    },error=>{
+      if(session!==locSession) return;
+      locRefreshPending=false;
+      if(!locating) return;
+      map.fire('locationerror',{code:error.code,message:error.message});
+    },{
+      enableHighAccuracy:true,
+      maximumAge:0,
+      timeout:4500
+    });
+  }
+
   // Spustí sledování polohy (použije tlačítko i řazení „Nejbližší")
   function startLocate(){
     if(locating) return;                                        // už běží → nic
     locating = true;                                            // označ jako zapnuté
+    locSession++;
     locFirstFix = true;                                         // příští fix přeletí mapu
     if(locateEl) locateEl.classList.add('active');              // zvýrazni tlačítko
     // watch:true = průběžné sledování; enableHighAccuracy = přesnější GPS
-    map.locate({watch:true, enableHighAccuracy:true, maxZoom:15}); // spusť geolokaci
+    map.locate({watch:true,enableHighAccuracy:true,maximumAge:0,timeout:10000,maxZoom:15});
+    clearInterval(locRefreshTimer);
+    locRefreshTimer=setInterval(requestLocationRefresh,5000);
+    requestLocationRefresh();
   }
 
   // Zastaví sledování a odstraní tečku i kruh
   function stopLocate(){
     locating = false;                                           // vypnuto
+    locSession++;
+    clearInterval(locRefreshTimer);
+    locRefreshTimer=0;
+    locRefreshPending=false;
     if(locateEl) locateEl.classList.remove('active');           // zruš zvýraznění
+    followingLocation=false;
+    if(followEl) followEl.classList.remove('active');
     map.stopLocate();                                           // zastav geolokaci
     if(locMarker){ map.removeLayer(locMarker); locMarker = null; } // odeber tečku
     if(locCircle){ map.removeLayer(locCircle); locCircle = null; } // odeber kruh
@@ -3865,10 +3967,16 @@
     document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDetail(); });
     // Po návratu do uspáné aplikace obnov dlaždice, které mohl iPad uvolnit z paměti.
     document.addEventListener('visibilitychange',()=>{
-      if(!document.hidden) refreshMapAfterDetailChange(true);
+      if(!document.hidden){
+        refreshMapAfterDetailChange(true);
+        if(locating) requestLocationRefresh();                 // po probuzení ihned obnov GPS údaj
+      }
     });
     window.addEventListener('pageshow',event=>{
-      if(event.persisted) refreshMapAfterDetailChange(true);
+      if(event.persisted){
+        refreshMapAfterDetailChange(true);
+        if(locating) requestLocationRefresh();
+      }
     });
     window.addEventListener('beforeunload',saveCurrentView);     // poslední pojistka před obnovením / zavřením
   }
