@@ -280,16 +280,17 @@
       transform:translate(-50%,-50%);border-radius:50%;          /* kruh přesně na střed */
       background:#2563eb;border:2.5px solid #fff;                /* sytě modré jádro s bílým rámečkem */
       box-shadow:0 1px 4px rgba(0,0,0,.45);                      /* jemný stín, ať vystoupí z mapy */
+      z-index:2;                                                  /* jádro nikdy nepřekryje animovaná svatozář */
     }
     .loc-pulse{
-      position:absolute;left:50%;top:50%;width:14px;height:14px; /* svatozář začíná ve velikosti jádra */
-      transform:translate(-50%,-50%);border-radius:50%;          /* kruh na střed */
-      background:rgba(37,99,235,.35);                            /* poloprůhledná modrá */
-      animation:locpulse 1.8s ease-out infinite;                 /* pomalé rozpínání */
+      position:absolute;left:50%;top:50%;width:34px;height:34px; /* jemná svatozář kolem jádra */
+      transform:translate(-50%,-50%) scale(.72);border-radius:50%; /* kruh na střed */
+      background:rgba(37,99,235,.22);z-index:1;                  /* vždy zůstává za modrým jádrem */
+      animation:locpulse 2.8s ease-in-out infinite alternate;    /* plynulý pohyb bez bliknutí při restartu */
     }
-    @keyframes locpulse{                                         /* svatozář se rozpíná a mizí */
-      0%{width:14px;height:14px;opacity:.6}
-      100%{width:46px;height:46px;opacity:0}
+    @keyframes locpulse{                                         /* svatozář plynule „dýchá“, nikdy náhle nezmizí */
+      0%{transform:translate(-50%,-50%) scale(.72);opacity:.18}
+      100%{transform:translate(-50%,-50%) scale(1);opacity:.34}
     }
 
     /* Přebarvení shluků značek do tématu aplikace */
