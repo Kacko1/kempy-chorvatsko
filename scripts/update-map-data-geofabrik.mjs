@@ -503,10 +503,19 @@ async function parseGeoJsonSequence(file, country){
   return bundle;
 }
 
-function compressBundle(bundle){
-  // Každou záložku balíme zvlášť. Prohlížeč tak u velkého Německa rozbalí jen
-  // právě otevřenou kategorii, ne několik milionů objektů ze všech záložek.
+function countryDataStem(country){
+  return country.file.replace(/_data\.json$/,'');
+}
+
+function partRelativePath(country,id){
+  return path.posix.join('map-data',countryDataStem(country),id + '.json.gz');
+}
+
+function compressBundleParts(bundle,country){
+  // Manifest zůstává malý. Každá záložka je samostatný binární gzip, takže
+  // prohlížeč nemusí při otevření země stahovat ostatní kategorie ani Base64.
   const parts = {};
+  const files = [];
   let sourceBytes = 0;
   let compressedBytes = 0;
   for(const [id,value] of Object.entries(bundle)){
@@ -515,12 +524,26 @@ function compressBundle(bundle){
     // Nativní zlib je u velkých zemí řádově rychlejší než původní čistě
     // JavaScriptový LZ-String. Úroveň 6 dává dobrý poměr rychlosti a velikosti.
     const compressed = gzipSync(source,{level:6});
-    parts[id] = {z:compressed.toString('base64')};
+    const file = partRelativePath(country,id);
+    parts[id] = {
+      file,
+      bytes:compressed.length,
+      sourceBytes:source.length,
+      count:Array.isArray(value.data) ? value.data.length : 0,
+      fetchedAt:value.fetchedAt || null
+    };
+    files.push({id,file,compressed});
     sourceBytes += source.length;
     compressedBytes += compressed.length;
   }
   return {
-    payload:JSON.stringify({compressed:'gzip-tabs-base64-v1',_meta:bundle._meta,parts}),
+    payload:JSON.stringify({
+      compressed:'gzip-tab-files-v1',
+      version:bundle._meta && bundle._meta.generatedAt || new Date().toISOString(),
+      _meta:bundle._meta || {},
+      parts
+    }),
+    files,
     sourceBytes,
     compressedBytes
   };
@@ -544,14 +567,20 @@ async function buildCountry(country){
       '-a','type,id','-i','sparse_file_array,' + locationIndex,'-o',geojsonSeq,filteredPbf
     ]);
     const bundle = await parseGeoJsonSequence(geojsonSeq,country);
-    console.log('  komprimuji výsledný JSON nativním gzipem…');
-    const compressed = compressBundle(bundle);
+    console.log('  komprimuji jednotlivé záložky nativním gzipem…');
+    const compressed = compressBundleParts(bundle,country);
     const payload = compressed.payload;
     console.log('  komprese hotova: ' + Math.round(compressed.sourceBytes/1024/1024)
       + ' MB → ' + Math.round(compressed.compressedBytes/1024/1024) + ' MB gzip');
+    for(const part of compressed.files){
+      const partOutput=path.join(TEMP_DIR,part.file);
+      await mkdir(path.dirname(partOutput),{recursive:true});
+      await writeFile(partOutput,part.compressed);
+      console.log('    ' + part.id + ': ' + Math.round(part.compressed.length/1024) + ' kB');
+    }
     const output = path.join(TEMP_DIR,country.file);
     await writeFile(output,payload,'utf8');
-    console.log('  připraven ' + country.file + ' (' + Math.round(Buffer.byteLength(payload)/1024) + ' kB)');
+    console.log('  připraven manifest ' + country.file + ' (' + Math.round(Buffer.byteLength(payload)/1024) + ' kB)');
   }finally{
     await rm(workDir,{recursive:true,force:true});
   }
@@ -591,12 +620,17 @@ async function runChecks(){
   assert.equal(zone.rules['motor_vehicle:conditional'],'no @ (Mo-Fr 08:00-18:00)');
   assert.equal(paidParkingForOverlay({amenity:'parking',fee:'yes'}),false);
   assert.equal(paidParkingForOverlay({amenity:'parking',fee:'yes',maxstay:'2 hours'}),true);
-  const compressionSample = {camps:{fetchedAt:1,data:[{id:'node/1',lat:50.1,lon:14.2,name:'Test'}]}};
-  const compressedSample = compressBundle(compressionSample);
+  const compressionSample = {
+    _meta:{generatedAt:'2026-01-01T00:00:00.000Z'},
+    camps:{fetchedAt:1,data:[{id:'node/1',lat:50.1,lon:14.2,name:'Test'}]}
+  };
+  const compressedSample = compressBundleParts(compressionSample,COUNTRIES[0]);
   const compressedWrapper = JSON.parse(compressedSample.payload);
-  assert.equal(compressedWrapper.compressed,'gzip-tabs-base64-v1');
+  assert.equal(compressedWrapper.compressed,'gzip-tab-files-v1');
+  assert.equal(compressedWrapper.parts.camps.file,'map-data/cesko/camps.json.gz');
+  assert.equal(compressedWrapper.parts.camps.count,1);
   assert.deepEqual(
-    JSON.parse(gunzipSync(Buffer.from(compressedWrapper.parts.camps.z,'base64')).toString('utf8')),
+    JSON.parse(gunzipSync(compressedSample.files[0].compressed).toString('utf8')),
     compressionSample.camps
   );
   const rawDescription = 'první řádek\ndruhý řádek';
@@ -628,7 +662,17 @@ async function main(){
   await mkdir(TEMP_DIR,{recursive:true});
   try{
     for(const country of countries) await buildCountry(country);
-    for(const country of countries) await copyFile(path.join(TEMP_DIR,country.file),path.join(OUTPUT_DIR,country.file));
+    for(const country of countries){
+      const destinationDir=path.join(OUTPUT_DIR,'map-data',countryDataStem(country));
+      await mkdir(destinationDir,{recursive:true});
+      for(const id of [...Object.keys(TABS),'zones']){
+        const relative=partRelativePath(country,id);
+        await copyFile(path.join(TEMP_DIR,relative),path.join(OUTPUT_DIR,relative));
+      }
+      // Manifest kopíruj až po všech částech. V jednom gitovém commitu se pak
+      // vždy zveřejní konzistentní sada dat dané země.
+      await copyFile(path.join(TEMP_DIR,country.file),path.join(OUTPUT_DIR,country.file));
+    }
     console.log('\nVšechny datové soubory byly úspěšně vytvořeny z výřezů Geofabrik.');
   }catch(error){
     console.error('\nAktualizace z Geofabriku selhala. Produkční JSON soubory zůstaly beze změny.');
