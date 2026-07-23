@@ -3120,9 +3120,12 @@
     const poi=isPoi();
     const cfg=poi ? activeCfg() : null;
     const f=cfg ? cfg.f : null;
-    // Kategorie se počítají jednou pro celý průchod, ne znovu u každého objektu.
+    // Výběrové typy se sčítají: objekt stačí zařadit do kterékoli vybrané
+    // kategorie, mezi významná místa nebo (v Chorvatsku) mezi filmová místa.
     const activeCats=cfg ? cfg.cats.filter(category=>f[category.key]).map(category=>category.key) : [];
-    const noPoiFilters=poi&&!q&&!region&&!f.notable&&!f.film&&!f.web&&!f.visited&&!f.fav&&!activeCats.length;
+    const filmFilter=poi&&activeCountry==='hr'&&!!f.film;
+    const hasPoiTypeFilters=poi&&(activeCats.length>0||!!f.notable||filmFilter);
+    const noPoiFilters=poi&&!q&&!region&&!hasPoiTypeFilters&&!f.web&&!f.visited&&!f.fav;
     const noCampFilters=!poi&&!q&&!region&&!minStars
       && !flags.car&&!flags.camp&&!flags.van&&!flags.web&&!flags.visited&&!flags.fav;
 
@@ -3136,9 +3139,12 @@
       if(region && site.region !== region) return false;       // jiná oblast → vyřaď
 
       if(poi){                                                  // ===== POI ZÁLOŽKY =====
-        if(f.notable && !site.notable) return false;           // významnost (jen turistika)
-        if(f.film && !site.film) return false;                 // filmová místa (jen turistika)
-        if(activeCats.length && !activeCats.includes(site.cat)) return false; // mimo výběr
+        if(hasPoiTypeFilters){
+          const matchesSelectedType = activeCats.includes(site.cat)
+            || (!!f.notable && !!site.notable)
+            || (filmFilter && !!site.film);
+          if(!matchesSelectedType) return false;               // neodpovídá žádnému vybranému typu
+        }
         if(f.web && !(site.website||site.wikipedia||(USER[site.id]&&USER[site.id].url))) return false; // má info
         if(f.visited && !isVisited(site)) return false;        // jen navštívená
         if(f.fav && !isFav(site)) return false;                // jen oblíbená
