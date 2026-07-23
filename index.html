@@ -2313,12 +2313,12 @@
     // Satelitní (fotografická) podkladová vrstva – Esri World Imagery (zdarma, bez klíče)
     const sat = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      {maxZoom:19, attribution:'Snímky © Esri · Data objektů © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>'}
+      {maxNativeZoom:18,maxZoom:19, attribution:'Snímky © Esri · Data objektů © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>'}
     );
     // Popisková vrstva navrch satelitu (názvy měst, hranice) pro lepší orientaci
     const labels = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-      {maxZoom:19}                                               // popisky
+      {maxNativeZoom:18,maxZoom:19}                              // poslední krok zvětší dostupnou vrstvu místo prázdných dlaždic
     );
     // Kombinovaná satelitní vrstva = snímky + popisky ve skupině
     const satGroup = L.layerGroup([sat, labels]);               // seskupení obou vrstev
