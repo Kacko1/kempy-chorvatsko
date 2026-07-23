@@ -74,30 +74,150 @@ jobs:
       max-parallel: 2
       matrix:
         include:
+          - country: al
+            label: Albánie
+            file: albanie_data.json
+            data_dir: map-data/albanie
+          - country: ad
+            label: Andorra
+            file: andorra_data.json
+            data_dir: map-data/andorra
+          - country: be
+            label: Belgie
+            file: belgie_data.json
+            data_dir: map-data/belgie
+          - country: by
+            label: Bělorusko
+            file: belorusko_data.json
+            data_dir: map-data/belorusko
+          - country: ba
+            label: Bosna a Hercegovina
+            file: bosna-a-hercegovina_data.json
+            data_dir: map-data/bosna-a-hercegovina
+          - country: bg
+            label: Bulharsko
+            file: bulharsko_data.json
+            data_dir: map-data/bulharsko
+          - country: me
+            label: Černá Hora
+            file: cerna-hora_data.json
+            data_dir: map-data/cerna-hora
           - country: cz
             label: Česko
             file: cesko_data.json
             data_dir: map-data/cesko
+          - country: dk
+            label: Dánsko
+            file: dansko_data.json
+            data_dir: map-data/dansko
+          - country: ee
+            label: Estonsko
+            file: estonsko_data.json
+            data_dir: map-data/estonsko
+          - country: fi
+            label: Finsko
+            file: finsko_data.json
+            data_dir: map-data/finsko
+          - country: fr
+            label: Francie
+            file: francie_data.json
+            data_dir: map-data/francie
+          - country: ge
+            label: Gruzie
+            file: gruzie_data.json
+            data_dir: map-data/gruzie
           - country: hr
             label: Chorvatsko
             file: chorvatsko_data.json
             data_dir: map-data/chorvatsko
+          - country: ie
+            label: Irsko
+            file: irsko_data.json
+            data_dir: map-data/irsko
+          - country: is
+            label: Island
+            file: island_data.json
+            data_dir: map-data/island
           - country: it
             label: Itálie
             file: italie_data.json
             data_dir: map-data/italie
+          - country: xk
+            label: Kosovo
+            file: kosovo_data.json
+            data_dir: map-data/kosovo
+          - country: cy
+            label: Kypr
+            file: kypr_data.json
+            data_dir: map-data/kypr
+          - country: li
+            label: Lichtenštejnsko
+            file: lichtenstejnsko_data.json
+            data_dir: map-data/lichtenstejnsko
+          - country: lt
+            label: Litva
+            file: litva_data.json
+            data_dir: map-data/litva
+          - country: lv
+            label: Lotyšsko
+            file: lotyssko_data.json
+            data_dir: map-data/lotyssko
+          - country: lu
+            label: Lucembursko
+            file: lucembursko_data.json
+            data_dir: map-data/lucembursko
+          - country: hu
+            label: Maďarsko
+            file: madarsko_data.json
+            data_dir: map-data/madarsko
+          - country: mt
+            label: Malta
+            file: malta_data.json
+            data_dir: map-data/malta
+          - country: md
+            label: Moldavsko
+            file: moldavsko_data.json
+            data_dir: map-data/moldavsko
+          - country: mc
+            label: Monako
+            file: monako_data.json
+            data_dir: map-data/monako
           - country: de
             label: Německo
             file: nemecko_data.json
             data_dir: map-data/nemecko
+          - country: nl
+            label: Nizozemsko
+            file: nizozemsko_data.json
+            data_dir: map-data/nizozemsko
+          - country: no
+            label: Norsko
+            file: norsko_data.json
+            data_dir: map-data/norsko
           - country: pl
             label: Polsko
             file: polsko_data.json
             data_dir: map-data/polsko
+          - country: pt
+            label: Portugalsko
+            file: portugalsko_data.json
+            data_dir: map-data/portugalsko
           - country: at
             label: Rakousko
             file: rakousko_data.json
             data_dir: map-data/rakousko
+          - country: ro
+            label: Rumunsko
+            file: rumunsko_data.json
+            data_dir: map-data/rumunsko
+          - country: gr
+            label: Řecko
+            file: recko_data.json
+            data_dir: map-data/recko
+          - country: mk
+            label: Severní Makedonie
+            file: severni-makedonie_data.json
+            data_dir: map-data/severni-makedonie
           - country: sk
             label: Slovensko
             file: slovensko_data.json
@@ -106,10 +226,34 @@ jobs:
             label: Slovinsko
             file: slovinsko_data.json
             data_dir: map-data/slovinsko
+          - country: gb
+            label: Spojené království
+            file: spojene-kralovstvi_data.json
+            data_dir: map-data/spojene-kralovstvi
+          - country: rs
+            label: Srbsko
+            file: srbsko_data.json
+            data_dir: map-data/srbsko
+          - country: es
+            label: Španělsko
+            file: spanelsko_data.json
+            data_dir: map-data/spanelsko
+          - country: se
+            label: Švédsko
+            file: svedsko_data.json
+            data_dir: map-data/svedsko
           - country: ch
             label: Švýcarsko
             file: svycarsko_data.json
             data_dir: map-data/svycarsko
+          - country: tr
+            label: Turecko
+            file: turecko_data.json
+            data_dir: map-data/turecko
+          - country: ua
+            label: Ukrajina
+            file: ukrajina_data.json
+            data_dir: map-data/ukrajina
 
     steps:
       - name: Načtení repozitáře
@@ -241,21 +385,25 @@ jobs:
         run: |
           git fetch --no-tags --filter=blob:none origin \
             "+refs/heads/$DATA_BRANCH:refs/remotes/origin/$DATA_BRANCH"
-          required_paths=(
-            cesko_data.json chorvatsko_data.json italie_data.json
-            nemecko_data.json polsko_data.json rakousko_data.json
-            slovensko_data.json slovinsko_data.json svycarsko_data.json
-            map-data/cesko map-data/chorvatsko map-data/italie
-            map-data/nemecko map-data/polsko map-data/rakousko
-            map-data/slovensko map-data/slovinsko map-data/svycarsko
+          country_paths=(
+            albanie andorra belgie belorusko bosna-a-hercegovina bulharsko
+            cerna-hora cesko dansko estonsko finsko francie gruzie chorvatsko
+            irsko island italie kosovo kypr lichtenstejnsko litva lotyssko
+            lucembursko madarsko malta moldavsko monako nemecko nizozemsko
+            norsko polsko portugalsko rakousko rumunsko recko severni-makedonie
+            slovensko slovinsko spojene-kralovstvi srbsko spanelsko svedsko
+            svycarsko turecko ukrajina
           )
-          for item in "${required_paths[@]}"; do
-            if ! git cat-file -e "origin/$DATA_BRANCH:$item"; then
+          for country_path in "${country_paths[@]}"; do
+            for item in "${country_path}_data.json" "map-data/$country_path"; do
+              if git cat-file -e "origin/$DATA_BRANCH:$item"; then
+                continue
+              fi
               echo "Datová větev není úplná, v hlavní větvi proto nic nemažu: $item"
               exit 1
-            fi
+            done
           done
-          echo "Datová větev obsahuje všech devět zemí."
+          echo "Datová větev obsahuje všech 45 zemí."
 
       - name: Uvolnění hlavní větve od velkých dat
         shell: bash
@@ -265,10 +413,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm -r --ignore-unmatch -- map-data
-          git rm --ignore-unmatch -- \
-            cesko_data.json chorvatsko_data.json italie_data.json \
-            nemecko_data.json polsko_data.json rakousko_data.json \
-            slovensko_data.json slovinsko_data.json svycarsko_data.json
+          git rm --ignore-unmatch -- '*_data.json'
 
           if git diff --cached --quiet; then
             echo "Hlavní větev už neobsahuje velké datové soubory."
