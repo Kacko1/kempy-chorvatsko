@@ -755,7 +755,7 @@
 
     // Turistická místa
     sights: { label:'🏛️ Turistická místa', accent:'#f59e0b', noun:'míst', cacheVersion:'v2',
-      special:['notable','film'], notableDefault:true,
+      special:['notable','film'],
       cats:[
         {key:'historic', label:'🏰 Pamětihodnosti', color:'#f59e0b', sel:['historic=castle','historic=fort','historic=fortress','historic=ruins','historic=city_gate','historic=tower','historic=archaeological_site','historic=monument','historic=memorial'], match:t=>['castle','fort','fortress','ruins','city_gate','tower','archaeological_site','monument','memorial'].includes(t.historic)},
         {key:'sacral', label:'⛪ Sakrální', color:'#f472b6', sel:['historic=monastery','historic=church'], match:t=>['monastery','church'].includes(t.historic)},
@@ -826,7 +826,6 @@
       cfg.colorOf = {}; cfg.labelOf = {}; cfg.f = {};           // mapy a stav filtrů
       cfg.cats.forEach(c=>{ cfg.colorOf[c.key]=c.color; cfg.labelOf[c.key]=c.label; cfg.f[c.key]=false; });
       (cfg.special||[]).forEach(s=> cfg.f[s]=false);            // speciální filtry (notable/film)
-      if(cfg.notableDefault) cfg.f.notable = true;              // významná zapnutá u turistiky
     }else{
       cfg.f = {};                                               // kempy: prázdný stav (mají vlastní flags)
     }
@@ -1093,7 +1092,7 @@
     return state;
   }
 
-  function resetFilterModel(useDefaults){
+  function resetFilterModel(){
     for(const key in flags) flags[key]=false;
     for(const id in TABS){
       const cfg=TABS[id];
@@ -1102,7 +1101,6 @@
       cfg.cats.forEach(cat=>cfg.f[cat.key]=false);
       (cfg.special||[]).forEach(key=>cfg.f[key]=false);
       cfg.f.web=false; cfg.f.visited=false; cfg.f.fav=false;
-      if(useDefaults && cfg.notableDefault) cfg.f.notable=true;
     }
   }
 
@@ -1144,7 +1142,7 @@
 
   function restoreActiveTabState(){
     const saved=countryViewState().tabs[activeTab];
-    resetFilterModel(true);
+    resetFilterModel();
     if(saved){
       if(saved.campFlags) for(const key in flags) flags[key]=!!saved.campFlags[key];
       if(saved.poiFilters && activeCfg().f){
@@ -1164,7 +1162,7 @@
   }
 
   function resetCurrentFilters(){
-    resetFilterModel(false);
+    resetFilterModel();
     document.getElementById('search').value='';
     document.getElementById('region').value='';
     document.getElementById('stars').value='0';
