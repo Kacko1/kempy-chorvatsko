@@ -28,30 +28,39 @@ jobs:
           - country: cz
             label: Česko
             file: cesko_data.json
+            data_dir: map-data/cesko
           - country: hr
             label: Chorvatsko
             file: chorvatsko_data.json
+            data_dir: map-data/chorvatsko
           - country: it
             label: Itálie
             file: italie_data.json
+            data_dir: map-data/italie
           - country: de
             label: Německo
             file: nemecko_data.json
+            data_dir: map-data/nemecko
           - country: pl
             label: Polsko
             file: polsko_data.json
+            data_dir: map-data/polsko
           - country: at
             label: Rakousko
             file: rakousko_data.json
+            data_dir: map-data/rakousko
           - country: sk
             label: Slovensko
             file: slovensko_data.json
+            data_dir: map-data/slovensko
           - country: si
             label: Slovinsko
             file: slovinsko_data.json
+            data_dir: map-data/slovinsko
           - country: ch
             label: Švýcarsko
             file: svycarsko_data.json
+            data_dir: map-data/svycarsko
 
     steps:
       - name: Načtení repozitáře
@@ -80,21 +89,22 @@ jobs:
           GEOFABRIK_MAX_ATTEMPTS: "3"
         run: node scripts/update-map-data-geofabrik.mjs --countries "${{ matrix.country }}"
 
-      - name: Okamžité uložení JSONu země
+      - name: Okamžité uložení dat země
         shell: bash
         env:
           DATA_FILE: ${{ matrix.file }}
+          DATA_DIR: ${{ matrix.data_dir }}
           COUNTRY_LABEL: ${{ matrix.label }}
           TARGET_BRANCH: ${{ github.ref_name }}
         run: |
-          if [[ -z "$(git status --porcelain -- "$DATA_FILE")" ]]; then
-            echo "$COUNTRY_LABEL: JSON se nezměnil."
+          if [[ -z "$(git status --porcelain -- "$DATA_FILE" "$DATA_DIR")" ]]; then
+            echo "$COUNTRY_LABEL: data se nezměnila."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- "$DATA_FILE"
+          git add -- "$DATA_FILE" "$DATA_DIR"
           git commit -m "Automatická aktualizace: $COUNTRY_LABEL"
 
           for attempt in 1 2 3 4 5; do
@@ -105,14 +115,14 @@ jobs:
               exit 1
             fi
             if git push origin "HEAD:$TARGET_BRANCH"; then
-              echo "$COUNTRY_LABEL: JSON byl uložen do repozitáře."
+              echo "$COUNTRY_LABEL: manifest i gzip části byly uloženy do repozitáře."
               exit 0
             fi
             echo "$COUNTRY_LABEL: souběžný push, opakuji pokus $attempt/5."
             sleep $((attempt * 5))
           done
 
-          echo "$COUNTRY_LABEL: JSON se nepodařilo pushnout ani po pěti pokusech."
+          echo "$COUNTRY_LABEL: data se nepodařilo pushnout ani po pěti pokusech."
           exit 1
 
       # Artefakt je záloha pro závěrečný krok. Vytvoří se i tehdy, když se
@@ -123,14 +133,16 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: map-data-${{ matrix.country }}
-          path: ${{ matrix.file }}
+          path: |
+            ${{ matrix.file }}
+            ${{ matrix.data_dir }}/
           if-no-files-found: error
           retention-days: 1
 
   update-data:
     name: Kontrola a uložení zbývajících výsledků
     needs: build-country
-    # Selhání jedné země nesmí zahodit JSONy ostatních. Při ručním zrušení
+    # Selhání jedné země nesmí zahodit data ostatních. Při ručním zrušení
     # běhu ale nedokončené výsledky záměrně neukládáme.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -152,19 +164,19 @@ jobs:
           path: .
           merge-multiple: true
 
-      - name: Uložení změněných JSON souborů
+      - name: Uložení změněných datových souborů
         shell: bash
         run: |
-          if [[ -z "$(git status --porcelain -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json slovinsko_data.json svycarsko_data.json)" ]]; then
-            echo "JSON soubory se nezměnily."
+          if [[ -z "$(git status --porcelain -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json slovinsko_data.json svycarsko_data.json map-data)" ]]; then
+            echo "Datové soubory se nezměnily."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json slovinsko_data.json svycarsko_data.json
-          echo "Ukládám tyto změněné JSONy:"
-          git status --short -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json slovinsko_data.json svycarsko_data.json
+          git add -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json slovinsko_data.json svycarsko_data.json map-data
+          echo "Ukládám tyto změněné datové soubory:"
+          git status --short -- cesko_data.json chorvatsko_data.json italie_data.json nemecko_data.json polsko_data.json rakousko_data.json slovensko_data.json svycarsko_data.json map-data
 
           git commit -m "Automatická aktualizace dostupných mapových dat"
           git push
