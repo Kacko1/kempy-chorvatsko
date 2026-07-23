@@ -99,6 +99,7 @@
     #backupControls,#markCleanup{display:flex;align-items:center;gap:6px;flex:0 0 auto}
     #reloadPage{white-space:nowrap;border-color:rgba(96,165,250,.65);color:#bfdbfe}
     #reloadPage:hover{background:rgba(96,165,250,.14);border-color:#60a5fa;color:#eff6ff}
+    .reload-mobile{display:none}
     #backupControls .btn{padding:6px 9px;font-size:11.5px;white-space:nowrap;border-color:rgba(45,212,191,.55);color:#99f6e4}
     #backupControls .btn:hover{background:rgba(45,212,191,.12);border-color:var(--sea);color:#ccfbf1}
     #markCleanup .btn{padding:6px 9px;font-size:11.5px;white-space:nowrap;border-color:rgba(239,68,68,.65);color:#fca5a5}
@@ -467,9 +468,20 @@
       #brand{display:none}                                      /* na mobilu skryj titulek kvůli místu na záložky */
       #detail{width:100%}                                       /* detail přes celou šířku */
       #status{display:none}                                     /* stav skryjeme kvůli místu */
-      #topbar{gap:6px;padding:7px 8px}
-      #topActions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
-      #backupControls,#markCleanup{display:contents}
+      #topbar{
+        display:grid;grid-template-columns:auto minmax(0,1fr) auto;
+        align-items:center;gap:6px;padding:7px 8px;
+      }
+      #sbtoggle{grid-column:1}
+      #countryWrap{grid-column:2;min-width:0;font-size:0}
+      #country{width:100%;min-width:0}
+      #topActions{display:contents}
+      #reloadPage{grid-column:3;justify-content:center;padding:6px 8px;font-size:11px}
+      .reload-full{display:none}
+      .reload-mobile{display:inline}
+      #backupControls,#markCleanup{
+        grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;
+      }
       #topActions .btn{justify-content:center;padding:6px 5px;font-size:11px;min-width:0}
     }
   </style>
@@ -541,7 +553,10 @@
       <div id="status">Načítám…</div>
       <div id="topActions">
         <!-- Obnovení celé stránky; před načtením se uloží aktuální mapa, filtry a otevřený objekt -->
-        <button id="reloadPage" class="btn" type="button" title="Obnovit celou webovou stránku">↻ Obnovit stránku</button>
+        <button id="reloadPage" class="btn" type="button" title="Obnovit celou webovou stránku">
+          <span class="reload-full">↻ Obnovit stránku</span>
+          <span class="reload-mobile">↻ Obnovit</span>
+        </button>
         <!-- Přenos osobních nastavení a uložených míst mezi prohlížeči -->
         <div id="backupControls">
           <button id="exportBackup" class="btn" type="button" title="Stáhnout nastavení a všechna uložená místa">⬇ Export</button>
@@ -1975,13 +1990,14 @@
     document.getElementById('refresh').hidden = (sourceMode==='baked'); // ↻ jen online
   }
 
-  // Aktualizuje popisky a polohu mapy podle vybrané země.
-  function updateCountryUI(moveMap){
+  // Aktualizuje popisky a polohu mapy podle vybrané země. Při spuštění stránky
+  // obnoví uložený pohled, ale ruční přepnutí země vždy ukáže celou novou zemi.
+  function updateCountryUI(moveMap,restoreSavedMap){
     const cfg = countryCfg();
     document.getElementById('country').value = activeCountry;
     document.getElementById('region').options[0].textContent = 'Celá země — '+cfg.label;
     if(moveMap && map){
-      const saved=countryViewState().map;
+      const saved=restoreSavedMap ? countryViewState().map : null;
       const valid=saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon) && Number.isFinite(saved.zoom);
       map.setView(valid ? [saved.lat,saved.lon] : cfg.center, valid ? saved.zoom : cfg.zoom);
     }
@@ -2007,7 +2023,7 @@
     renderZoneOverlay();
     USER = loadUser();
     closeDetail();
-    updateCountryUI(true);
+    updateCountryUI(true,initial);
     updateTabUI();
 
     try{
@@ -2673,6 +2689,38 @@
     return m;
   }
 
+  // Otevře stejnou mobilní bublinu také po výběru místa v levém seznamu.
+  // Když bod při daném přiblížení ještě leží uvnitř shluku, použije se
+  // dočasný popup přímo na jeho souřadnicích, takže uživatel vždy uvidí místo.
+  function openTapPopupForSite(site){
+    const marker=markerById[site.id];
+    if(marker){
+      marker.openPopup();
+      return;
+    }
+    openTapPopupId=site.id;
+    const popup=L.popup({minWidth:210,closeButton:true,autoPan:true})
+      .setLatLng([site.lat,site.lon])
+      .setContent(popupHtml(site,true));
+    popup.on('add',()=>{
+      requestAnimationFrame(()=>{
+        const popupElement=popup.getElement();
+        const button=popupElement&&popupElement.querySelector('[data-detail]');
+        if(!button) return;
+        button.onclick=event=>{
+          event.preventDefault();
+          event.stopPropagation();
+          map.closePopup(popup);
+          openDetail(site.id);
+        };
+      });
+    });
+    popup.on('remove',()=>{
+      if(openTapPopupId===site.id) openTapPopupId=null;
+    });
+    popup.openOn(map);
+  }
+
   function visibleMarkerOrigins(){
     const origins=[];
     const visit=layer=>{
@@ -2896,16 +2944,35 @@
     });
   }
 
-  // Přeletí mapou na místo a otevře jeho detail
+  // Přeletí mapou na místo. Na mobilu otevře bublinu, na počítači detail.
   function focusSite(id){
     const site = ALL.find(s=>s.id===id);                        // najdi kemp podle ID
     if(!site) return;                                           // pojistka
-    map.once('moveend',()=>{
+    const tapPopup=usesTapPopup();
+    if(tapPopup){
+      // Pokud byl otevřený starší detail, nejdřív jej zasuň. Nově vybrané místo
+      // se pouze zvýrazní a detail zůstane dostupný tlačítkem v bublině.
+      if(document.getElementById('detail').classList.contains('open')) closeDetail();
+      setActiveSite(site);
+      scheduleViewSave();
+      if(window.innerWidth<=760) closeSidebar();
+    }
+    let mobilePopupScheduled=false;
+    const finishFocus=()=>{
+      map.off('moveend',finishFocus);
       renderVisibleMarkers();
-    });
+      if(tapPopup&&!mobilePopupScheduled){
+        mobilePopupScheduled=true;
+        // Běžný obslužný kód moveend ještě plánuje finální překreslení.
+        // Popup proto otevři až v následujícím snímku nad hotovými značkami.
+        requestAnimationFrame(()=>openTapPopupForSite(site));
+      }
+    };
+    map.once('moveend',finishFocus);
     map.flyTo([site.lat, site.lon], 15, {duration:.6});         // plynulý přelet na místo
-    openDetail(id);                                             // otevři detailní panel
-    if(window.innerWidth <= 760) closeSidebar();               // na mobilu zavři sidebar
+    // Při klepnutí na už vystředěný bod některé prohlížeče moveend nepošlou.
+    if(tapPopup) setTimeout(()=>{ if(!mobilePopupScheduled) finishFocus(); },900);
+    if(!tapPopup) openDetail(id);                               // počítač: otevři detailní panel
   }
 
   /* =========================================================================
