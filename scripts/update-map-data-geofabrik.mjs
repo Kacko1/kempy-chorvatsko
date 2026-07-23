@@ -14,15 +14,51 @@ const DOWNLOAD_TIMEOUT_MS = numberFromEnv('GEOFABRIK_TIMEOUT_MS', 3_600_000);
 const DOWNLOAD_ATTEMPTS = numberFromEnv('GEOFABRIK_MAX_ATTEMPTS', 3);
 
 const COUNTRIES = [
+  { id:'al', iso:'AL', label:'Albánie', file:'albanie_data.json', nameTag:'name:sq', extract:'albania', bounds:[39.5,19.0,42.8,21.2] },
+  { id:'ad', iso:'AD', label:'Andorra', file:'andorra_data.json', nameTag:'name:ca', extract:'andorra', bounds:[42.4,1.4,42.7,1.8] },
+  { id:'be', iso:'BE', label:'Belgie', file:'belgie_data.json', nameTag:'name:nl', extract:'belgium', bounds:[49.4,2.3,51.6,6.5] },
+  { id:'by', iso:'BY', label:'Bělorusko', file:'belorusko_data.json', nameTag:'name:be', extract:'belarus', bounds:[51.0,23.0,56.3,33.0] },
+  { id:'ba', iso:'BA', label:'Bosna a Hercegovina', file:'bosna-a-hercegovina_data.json', nameTag:'name:bs', extract:'bosnia-herzegovina', bounds:[42.5,15.5,45.5,19.8] },
+  { id:'bg', iso:'BG', label:'Bulharsko', file:'bulharsko_data.json', nameTag:'name:bg', extract:'bulgaria', bounds:[40.8,22.2,44.3,29.0] },
+  { id:'me', iso:'ME', label:'Černá Hora', file:'cerna-hora_data.json', nameTag:'name:sr', extract:'montenegro', bounds:[41.8,18.3,43.7,20.5] },
   { id:'cz', iso:'CZ', label:'Česko', file:'cesko_data.json', nameTag:'name:cs', extract:'czech-republic', bounds:[48.3,11.8,51.3,19.0] },
+  { id:'dk', iso:'DK', label:'Dánsko', file:'dansko_data.json', nameTag:'name:da', extract:'denmark', bounds:[54.4,7.8,57.9,15.3] },
+  { id:'ee', iso:'EE', label:'Estonsko', file:'estonsko_data.json', nameTag:'name:et', extract:'estonia', bounds:[57.4,21.5,59.9,28.3] },
+  { id:'fi', iso:'FI', label:'Finsko', file:'finsko_data.json', nameTag:'name:fi', extract:'finland', bounds:[59.5,19.0,70.2,32.0] },
+  { id:'fr', iso:'FR', label:'Francie', file:'francie_data.json', nameTag:'name:fr', extract:'france', bounds:[41.2,-5.5,51.5,9.8] },
+  { id:'ge', iso:'GE', label:'Gruzie', file:'gruzie_data.json', nameTag:'name:ka', extract:'georgia', bounds:[41.0,40.0,43.7,46.8] },
   { id:'hr', iso:'HR', label:'Chorvatsko', file:'chorvatsko_data.json', nameTag:'name:hr', extract:'croatia', bounds:[42.2,13.0,46.8,20.0] },
+  { id:'ie', iso:'IE', label:'Irsko', file:'irsko_data.json', nameTag:'name:en', extract:'ireland-and-northern-ireland', bounds:[51.2,-11.2,55.6,-5.2] },
+  { id:'is', iso:'IS', label:'Island', file:'island_data.json', nameTag:'name:is', extract:'iceland', bounds:[63.0,-25.0,67.0,-12.0] },
   { id:'it', iso:'IT', label:'Itálie', file:'italie_data.json', nameTag:'name:it', extract:'italy', bounds:[35.0,6.0,47.7,19.0] },
+  { id:'xk', iso:'XK', label:'Kosovo', file:'kosovo_data.json', nameTag:'name:sq', extract:'kosovo', bounds:[41.8,20.0,43.3,21.9] },
+  { id:'cy', iso:'CY', label:'Kypr', file:'kypr_data.json', nameTag:'name:el', extract:'cyprus', bounds:[34.3,32.0,35.8,34.8] },
+  { id:'li', iso:'LI', label:'Lichtenštejnsko', file:'lichtenstejnsko_data.json', nameTag:'name:de', extract:'liechtenstein', bounds:[47.0,9.45,47.3,9.65] },
+  { id:'lt', iso:'LT', label:'Litva', file:'litva_data.json', nameTag:'name:lt', extract:'lithuania', bounds:[53.8,20.8,56.6,26.9] },
+  { id:'lv', iso:'LV', label:'Lotyšsko', file:'lotyssko_data.json', nameTag:'name:lv', extract:'latvia', bounds:[55.5,20.5,58.2,28.3] },
+  { id:'lu', iso:'LU', label:'Lucembursko', file:'lucembursko_data.json', nameTag:'name:lb', extract:'luxembourg', bounds:[49.4,5.7,50.2,6.6] },
+  { id:'hu', iso:'HU', label:'Maďarsko', file:'madarsko_data.json', nameTag:'name:hu', extract:'hungary', bounds:[45.5,16.0,48.7,23.0] },
+  { id:'mt', iso:'MT', label:'Malta', file:'malta_data.json', nameTag:'name:mt', extract:'malta', bounds:[35.7,14.1,36.2,14.7] },
+  { id:'md', iso:'MD', label:'Moldavsko', file:'moldavsko_data.json', nameTag:'name:ro', extract:'moldova', bounds:[45.3,26.5,48.6,30.3] },
+  { id:'mc', iso:'MC', label:'Monako', file:'monako_data.json', nameTag:'name:fr', extract:'monaco', bounds:[43.72,7.40,43.76,7.45] },
   { id:'de', iso:'DE', label:'Německo', file:'nemecko_data.json', nameTag:'name:de', extract:'germany', bounds:[47.0,5.0,55.5,16.0] },
+  { id:'nl', iso:'NL', label:'Nizozemsko', file:'nizozemsko_data.json', nameTag:'name:nl', extract:'netherlands', bounds:[50.7,3.2,53.7,7.3] },
+  { id:'no', iso:'NO', label:'Norsko', file:'norsko_data.json', nameTag:'name:no', extract:'norway', bounds:[57.0,4.0,72.0,32.0] },
   { id:'pl', iso:'PL', label:'Polsko', file:'polsko_data.json', nameTag:'name:pl', extract:'poland', bounds:[48.5,13.5,55.5,24.5] },
+  { id:'pt', iso:'PT', label:'Portugalsko', file:'portugalsko_data.json', nameTag:'name:pt', extract:'portugal', bounds:[36.8,-9.6,42.3,-6.0] },
   { id:'at', iso:'AT', label:'Rakousko', file:'rakousko_data.json', nameTag:'name:de', extract:'austria', bounds:[46.0,9.0,49.5,18.0] },
+  { id:'ro', iso:'RO', label:'Rumunsko', file:'rumunsko_data.json', nameTag:'name:ro', extract:'romania', bounds:[43.5,20.0,48.5,30.0] },
+  { id:'gr', iso:'GR', label:'Řecko', file:'recko_data.json', nameTag:'name:el', extract:'greece', bounds:[34.5,19.0,42.0,29.7] },
+  { id:'mk', iso:'MK', label:'Severní Makedonie', file:'severni-makedonie_data.json', nameTag:'name:mk', extract:'macedonia', bounds:[40.8,20.4,42.4,23.1] },
   { id:'sk', iso:'SK', label:'Slovensko', file:'slovensko_data.json', nameTag:'name:sk', extract:'slovakia', bounds:[47.0,16.5,50.5,23.0] },
   { id:'si', iso:'SI', label:'Slovinsko', file:'slovinsko_data.json', nameTag:'name:sl', extract:'slovenia', bounds:[45.0,13.0,47.2,17.0] },
-  { id:'ch', iso:'CH', label:'Švýcarsko', file:'svycarsko_data.json', nameTag:'name:de', extract:'switzerland', bounds:[45.5,5.5,48.2,11.0] }
+  { id:'gb', iso:'GB', label:'Spojené království', file:'spojene-kralovstvi_data.json', nameTag:'name:en', extract:'united-kingdom', bounds:[49.5,-8.7,61.0,2.0] },
+  { id:'rs', iso:'RS', label:'Srbsko', file:'srbsko_data.json', nameTag:'name:sr', extract:'serbia', bounds:[41.7,18.8,46.3,23.2] },
+  { id:'es', iso:'ES', label:'Španělsko', file:'spanelsko_data.json', nameTag:'name:es', extract:'spain', bounds:[35.5,-10.0,44.0,4.5] },
+  { id:'se', iso:'SE', label:'Švédsko', file:'svedsko_data.json', nameTag:'name:sv', extract:'sweden', bounds:[55.0,10.0,70.0,25.0] },
+  { id:'ch', iso:'CH', label:'Švýcarsko', file:'svycarsko_data.json', nameTag:'name:de', extract:'switzerland', bounds:[45.5,5.5,48.2,11.0] },
+  { id:'tr', iso:'TR', label:'Turecko', file:'turecko_data.json', nameTag:'name:tr', extract:'turkey', bounds:[35.5,25.5,42.5,45.0] },
+  { id:'ua', iso:'UA', label:'Ukrajina', file:'ukrajina_data.json', nameTag:'name:uk', extract:'ukraine', bounds:[43.5,22.0,53.0,41.0] }
 ].map(country=>({
   ...country,
   pbfUrl:'https://download.geofabrik.de/europe/' + country.extract + '-latest.osm.pbf'
@@ -472,6 +508,11 @@ async function parseGeoJsonSequence(file, country){
       if(category) maps[tabId].set(item.id,poiFromFeature(item,country,tabId,category));
     }
   }
+  const matchedObjects = [...Object.values(maps),zones]
+    .reduce((sum,items)=>sum + items.size,0);
+  if(matchedObjects === 0){
+    throw new Error(country.label + ': výřez neobsahuje žádný požadovaný objekt; data nebudou nahrazena');
+  }
   const fetchedAt = Date.now();
   const bundle = {
     _meta:{
@@ -487,9 +528,9 @@ async function parseGeoJsonSequence(file, country){
   for(const tabId of Object.keys(TABS)){
     const data = [...maps[tabId].values()];
     if(tabId === 'sights' && country.id === 'hr') mergeFilms(data);
-    if(data.length === 0) throw new Error(country.label + ' / ' + TABS[tabId].label + ': prázdná data');
     bundle[tabId] = {fetchedAt,data};
-    console.log('  ' + TABS[tabId].label + ': ' + data.length + ' objektů');
+    console.log('  ' + TABS[tabId].label + ': ' + data.length + ' objektů'
+      + (data.length === 0 ? ' (v tomto výřezu žádné nejsou)' : ''));
   }
   bundle.zones = {fetchedAt,data:[...zones.values()]};
   const zoneCounts = Object.fromEntries(Object.keys(ZONE_LABELS).map(kind=>[kind,0]));
@@ -587,12 +628,13 @@ async function buildCountry(country){
 }
 
 async function runChecks(){
-  assert.equal(COUNTRIES.length,9);
+  assert.equal(COUNTRIES.length,45);
   assert.equal(Object.keys(TABS).length,7);
-  assert.deepEqual(COUNTRIES.map(country=>country.file),[
-    'cesko_data.json','chorvatsko_data.json','italie_data.json','nemecko_data.json',
-    'polsko_data.json','rakousko_data.json','slovensko_data.json','slovinsko_data.json','svycarsko_data.json'
-  ]);
+  assert.equal(new Set(COUNTRIES.map(country=>country.id)).size,COUNTRIES.length);
+  assert.equal(new Set(COUNTRIES.map(country=>country.file)).size,COUNTRIES.length);
+  assert.equal(new Set(COUNTRIES.map(country=>country.extract)).size,COUNTRIES.length);
+  assert.ok(COUNTRIES.some(country=>country.id==='tr' && country.extract==='turkey'));
+  assert.ok(!COUNTRIES.some(country=>country.id==='ru'));
   assert.ok(filterExpressions().includes('nwr/tourism=camp_site,caravan_site,museum,gallery,artwork,aquarium,viewpoint,theme_park,zoo,attraction,hotel,apartment,guest_house,hostel,motel,chalet'));
   assert.ok(filterExpressions().some(expression=>
     expression.startsWith('nwr/boundary=') &&
@@ -600,21 +642,22 @@ async function runChecks(){
   assert.ok(filterExpressions().includes('nwr/type=toll'));
   assert.deepEqual(bboxCenter({type:'Point',coordinates:[14.25,50.1]}),{lat:50.1,lon:14.25});
   assert.deepEqual(bboxCenter({type:'Polygon',coordinates:[[[10,40],[14,40],[14,44],[10,44],[10,40]]]}),{lat:42,lon:12});
+  const testCountry = COUNTRIES.find(country=>country.id === 'cz');
   assert.equal(parseFeature({
     type:'Feature',properties:{'@type':'node','@id':1,tourism:'camp_site'},
     geometry:{type:'Point',coordinates:[50.1,14.25]}
-  },COUNTRIES[0]),null,'prohozené souřadnice musí odmítnout kontrola hranic země');
+  },testCountry),null,'prohozené souřadnice musí odmítnout kontrola hranic země');
   const sample = parseFeature({
     type:'Feature',properties:{'@type':'way','@id':123,tourism:'camp_site',name:'Test'},
     geometry:{type:'LineString',coordinates:[[14,49],[16,51]]}
-  },COUNTRIES[0]);
+  },testCountry);
   assert.equal(sample.id,'way/123');
   assert.deepEqual({lat:sample.lat,lon:sample.lon},{lat:50,lon:15});
-  assert.equal(campFromFeature(sample,COUNTRIES[0]).name,'Test');
+  assert.equal(campFromFeature(sample,testCountry).name,'Test');
   const zone = zoneFromFeature(parseFeature({
     type:'Feature',properties:{'@type':'relation','@id':456,boundary:'low_emission_zone',name:'Testovací zóna','motor_vehicle:conditional':'no @ (Mo-Fr 08:00-18:00)'},
     geometry:{type:'Polygon',coordinates:[[[14,49],[16,49],[16,51],[14,51],[14,49]]]}
-  },COUNTRIES[0]),COUNTRIES[0]);
+  },testCountry),testCountry);
   assert.equal(zone.kind,'low_emission');
   assert.equal(zone.geometry.type,'Polygon');
   assert.equal(zone.rules['motor_vehicle:conditional'],'no @ (Mo-Fr 08:00-18:00)');
@@ -624,7 +667,7 @@ async function runChecks(){
     _meta:{generatedAt:'2026-01-01T00:00:00.000Z'},
     camps:{fetchedAt:1,data:[{id:'node/1',lat:50.1,lon:14.2,name:'Test'}]}
   };
-  const compressedSample = compressBundleParts(compressionSample,COUNTRIES[0]);
+  const compressedSample = compressBundleParts(compressionSample,testCountry);
   const compressedWrapper = JSON.parse(compressedSample.payload);
   assert.equal(compressedWrapper.compressed,'gzip-tab-files-v1');
   assert.equal(compressedWrapper.parts.camps.file,'map-data/cesko/camps.json.gz');
