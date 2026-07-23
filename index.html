@@ -95,7 +95,10 @@
       padding:7px 30px 7px 10px;border-radius:9px;font-size:12.5px;cursor:pointer;
     }
     #country:focus{outline:none;border-color:var(--sea)}
-    #markCleanup{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+    #topActions{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+    #backupControls,#markCleanup{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+    #backupControls .btn{padding:6px 9px;font-size:11.5px;white-space:nowrap;border-color:rgba(45,212,191,.55);color:#99f6e4}
+    #backupControls .btn:hover{background:rgba(45,212,191,.12);border-color:var(--sea);color:#ccfbf1}
     #markCleanup .btn{padding:6px 9px;font-size:11.5px;white-space:nowrap;border-color:rgba(239,68,68,.65);color:#fca5a5}
     #markCleanup .btn:hover{background:rgba(239,68,68,.15);border-color:#ef4444;color:#fecaca}
 
@@ -416,8 +419,9 @@
       #detail{width:100%}                                       /* detail přes celou šířku */
       #status{display:none}                                     /* stav skryjeme kvůli místu */
       #topbar{gap:6px;padding:7px 8px}
-      #markCleanup{width:100%;display:grid;grid-template-columns:1fr 1fr}
-      #markCleanup .btn{justify-content:center;padding:6px 5px;font-size:11px}
+      #topActions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+      #backupControls,#markCleanup{display:contents}
+      #topActions .btn{justify-content:center;padding:6px 5px;font-size:11px;min-width:0}
     }
   </style>
 </head>
@@ -450,10 +454,18 @@
       </label>
       <!-- Stavový text o datech (naplní JS) -->
       <div id="status">Načítám…</div>
-      <!-- Globální mazání uložených označení; každá akce má vlastní potvrzení -->
-      <div id="markCleanup">
-        <button id="clearFavorites" class="btn" type="button" title="Smazat oblíbená místa ve všech zemích">★ Smazat oblíbené</button>
-        <button id="clearVisited" class="btn" type="button" title="Smazat navštívená místa ve všech zemích">✔ Smazat navštívené</button>
+      <div id="topActions">
+        <!-- Přenos osobních nastavení a uložených míst mezi prohlížeči -->
+        <div id="backupControls">
+          <button id="exportBackup" class="btn" type="button" title="Stáhnout nastavení a všechna uložená místa">⬇ Export</button>
+          <button id="importBackup" class="btn" type="button" title="Obnovit nastavení a uložená místa ze zálohy">⬆ Import</button>
+          <input id="importBackupFile" type="file" accept=".json,application/json" hidden>
+        </div>
+        <!-- Globální mazání uložených označení; každá akce má vlastní potvrzení -->
+        <div id="markCleanup">
+          <button id="clearFavorites" class="btn" type="button" title="Smazat oblíbená místa ve všech zemích">★ Smazat oblíbené</button>
+          <button id="clearVisited" class="btn" type="button" title="Smazat navštívená místa ve všech zemích">✔ Smazat navštívené</button>
+        </div>
       </div>
       <!-- Přepínač zdroje dat: offline (uložený soubor) vs online (stahování) -->
       <div id="srcSwitch" class="seg" hidden>
@@ -631,6 +643,8 @@
   const VIEW_STATE_KEY = 'travel_map_view_state_v1'; // mapa, záložka, filtry a otevřený objekt podle země
   const BASE_LAYER_KEY = 'travel_map_base_layer_v1'; // satelitní / klasický mapový podklad
   const SIDEBAR_KEY = 'travel_map_sidebar_collapsed_v1'; // sbalení levého panelu na počítači
+  const BACKUP_FORMAT = 'cestovni-mapa-backup';
+  const BACKUP_VERSION = 1;
   function countryCfg(){ return COUNTRIES[activeCountry]; }
   function userKey(code=activeCountry){ return 'travel_map_user_'+code+'_v1'; }
   function cacheKey(tabId){
@@ -855,6 +869,7 @@
   let lastRenderedZoom = null;   // předchozí zoom pro animaci rozdělení a spojení shluků
   let filterTimer = 0;           // krátké zpoždění hledání, aby se milionový index nestavěl po každé klávese
   let viewStateSaveTimer = 0;    // sloučí časté změny mapy do jediného zápisu
+  let detailMapRefreshTimer = 0; // dokončení překreslení mapy po zasunutí pravého detailu
   let stateRestoring = false;    // během obnovování nepřepisuj uložený stav výchozími hodnotami
   const LIST_LIMIT = 300;        // nejvýše tolik DOM řádků najednou (hlavně kvůli mobilům)
   let activeId = null;          // ID právě otevřeného místa v detailu
@@ -881,6 +896,187 @@
   function safeSet(key, val){
     try{ localStorage.setItem(key, JSON.stringify(val)); }  // zkus uložit
     catch(e){ /* úložiště nedostupné — pokračuj bez ukládání */ }
+  }
+
+  // Vytvoří malou přenositelnou zálohu. Datové JSONy a jejich cache se neukládají,
+  // protože se na novém zařízení načtou z webu; osobní údaje se ukládají všechny.
+  function buildPersonalBackup(){
+    saveCurrentView();
+    const users={};
+    for(const code of Object.keys(COUNTRIES)){
+      users[code]=code===activeCountry ? USER : safeGet(userKey(code),{});
+    }
+    return {
+      format:BACKUP_FORMAT,
+      version:BACKUP_VERSION,
+      exportedAt:new Date().toISOString(),
+      settings:{
+        country:activeCountry,
+        zonesVisible:zonesEnabled,
+        pointsVisible:pointsEnabled,
+        viewState,
+        baseLayer:safeGet(BASE_LAYER_KEY,'satellite'),
+        sidebarCollapsed:document.getElementById('body').classList.contains('sb-collapsed')
+      },
+      users
+    };
+  }
+
+  function downloadPersonalBackup(){
+    try{
+      const backup=buildPersonalBackup();
+      const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement('a');
+      link.href=url;
+      link.download='cestovni-mapa-zaloha-'+new Date().toISOString().slice(0,10)+'.json';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+      toast('Záloha nastavení a uložených míst byla stažena');
+    }catch(e){
+      window.alert('Zálohu se nepodařilo vytvořit. Zkus to prosím znovu.');
+    }
+  }
+
+  function isPlainObject(value){
+    return !!value && typeof value==='object' && !Array.isArray(value);
+  }
+
+  // Přijme jen pole, která aplikace skutečně používá. Chybné nebo ručně upravené
+  // soubory tak nemohou po importu rozbít načítání mapy.
+  function normalizeImportedViewState(raw){
+    const result={countries:{}};
+    if(!isPlainObject(raw) || !isPlainObject(raw.countries)) return result;
+    for(const code of Object.keys(COUNTRIES)){
+      const source=raw.countries[code];
+      if(!isPlainObject(source)) continue;
+      const countryState={
+        tab:TABS[source.tab] ? source.tab : 'camps',
+        activeId:typeof source.activeId==='string' ? source.activeId : null,
+        map:null,
+        tabs:{}
+      };
+      if(isPlainObject(source.map)){
+        const lat=Number(source.map.lat), lon=Number(source.map.lon), zoom=Number(source.map.zoom);
+        if(Number.isFinite(lat) && lat>=-90 && lat<=90 &&
+           Number.isFinite(lon) && lon>=-180 && lon<=180 &&
+           Number.isFinite(zoom) && zoom>=2 && zoom<=20){
+          countryState.map={lat,lon,zoom};
+        }
+      }
+      if(isPlainObject(source.tabs)){
+        for(const tabId of Object.keys(TABS)){
+          const tab=source.tabs[tabId];
+          if(!isPlainObject(tab)) continue;
+          const normalized={
+            search:typeof tab.search==='string' ? tab.search.slice(0,500) : '',
+            region:typeof tab.region==='string' ? tab.region.slice(0,200) : '',
+            stars:['0','2','3','4'].includes(String(tab.stars)) ? String(tab.stars) : '0',
+            sort:['name','dist','stars','region'].includes(tab.sort) ? tab.sort : 'name',
+            campFlags:{},
+            poiFilters:{}
+          };
+          if(isPlainObject(tab.campFlags)){
+            for(const key of Object.keys(flags)) normalized.campFlags[key]=!!tab.campFlags[key];
+          }
+          if(isPlainObject(tab.poiFilters)){
+            for(const [key,value] of Object.entries(tab.poiFilters)){
+              if(key.length<=100 && typeof value==='boolean') normalized.poiFilters[key]=value;
+            }
+          }
+          countryState.tabs[tabId]=normalized;
+        }
+      }
+      result.countries[code]=countryState;
+    }
+    return result;
+  }
+
+  function normalizeImportedUsers(raw){
+    const users={};
+    const textFields=['price','carSleep','url','notes','addr'];
+    for(const code of Object.keys(COUNTRIES)){
+      const source=isPlainObject(raw) && isPlainObject(raw[code]) ? raw[code] : {};
+      const records={};
+      for(const [id,entry] of Object.entries(source)){
+        if(!id || id.length>250 || !isPlainObject(entry)) continue;
+        const normalized={};
+        if(typeof entry.visited==='boolean') normalized.visited=entry.visited;
+        if(typeof entry.fav==='boolean') normalized.fav=entry.fav;
+        for(const field of textFields){
+          if(typeof entry[field]==='string') normalized[field]=entry[field];
+        }
+        if(Object.keys(normalized).length) records[id]=normalized;
+      }
+      users[code]=records;
+    }
+    return users;
+  }
+
+  function normalizePersonalBackup(raw){
+    if(!isPlainObject(raw) || raw.format!==BACKUP_FORMAT){
+      throw new Error('Vybraný soubor není záloha této cestovní mapy.');
+    }
+    if(raw.version!==BACKUP_VERSION){
+      throw new Error('Tato verze zálohy není podporována.');
+    }
+    if(!isPlainObject(raw.settings) || !isPlainObject(raw.users)){
+      throw new Error('Záloha je neúplná nebo poškozená.');
+    }
+    return {
+      settings:{
+        country:COUNTRIES[raw.settings.country] ? raw.settings.country : 'cz',
+        zonesVisible:raw.settings.zonesVisible===true,
+        pointsVisible:raw.settings.pointsVisible!==false,
+        viewState:normalizeImportedViewState(raw.settings.viewState),
+        baseLayer:raw.settings.baseLayer==='street' ? 'street' : 'satellite',
+        sidebarCollapsed:raw.settings.sidebarCollapsed===true
+      },
+      users:normalizeImportedUsers(raw.users)
+    };
+  }
+
+  async function restorePersonalBackup(file){
+    const input=document.getElementById('importBackupFile');
+    try{
+      if(!file) return;
+      if(file.size>10*1024*1024) throw new Error('Soubor je příliš velký a nevypadá jako běžná záloha.');
+      const raw=JSON.parse(await file.text());
+      const backup=normalizePersonalBackup(raw);
+      let favoriteCount=0, visitedCount=0, recordCount=0;
+      for(const records of Object.values(backup.users)){
+        for(const entry of Object.values(records)){
+          recordCount++;
+          if(entry.fav) favoriteCount++;
+          if(entry.visited) visitedCount++;
+        }
+      }
+      const accepted=window.confirm(
+        'Import nahradí současná nastavení a osobní údaje ve všech zemích.\n\n'
+        +'Záloha obsahuje '+recordCount+' uložených míst, z toho '
+        +favoriteCount+' oblíbených a '+visitedCount+' navštívených.\n\nPokračovat?'
+      );
+      if(!accepted) return;
+
+      localStorage.setItem(COUNTRY_KEY,JSON.stringify(backup.settings.country));
+      localStorage.setItem(SRC_MODE_KEY,JSON.stringify('baked'));
+      localStorage.setItem(ZONES_KEY,JSON.stringify(backup.settings.zonesVisible));
+      localStorage.setItem(POINTS_KEY,JSON.stringify(backup.settings.pointsVisible));
+      localStorage.setItem(VIEW_STATE_KEY,JSON.stringify(backup.settings.viewState));
+      localStorage.setItem(BASE_LAYER_KEY,JSON.stringify(backup.settings.baseLayer));
+      localStorage.setItem(SIDEBAR_KEY,JSON.stringify(backup.settings.sidebarCollapsed));
+      for(const code of Object.keys(COUNTRIES)){
+        localStorage.setItem(userKey(code),JSON.stringify(backup.users[code]));
+      }
+      window.alert('Import byl dokončen. Mapa se nyní obnoví s načtenou zálohou.');
+      window.location.reload();
+    }catch(e){
+      window.alert('Import se nepodařil: '+(e&&e.message ? e.message : 'neplatný soubor'));
+    }finally{
+      if(input) input.value='';
+    }
   }
 
   // Malý pracovní stav aplikace. Velká mapová data zůstávají v oddělené cache.
@@ -2576,6 +2772,7 @@
 
     // Otevři panel
     document.getElementById('detail').classList.add('open');   // přidej třídu = zasunutí panelu
+    refreshMapAfterDetailChange(false);
   }
 
   // Detail POI (turistika, příroda, jídlo, zázemí, lázně)
@@ -2657,6 +2854,7 @@
     wireMarkBtns(id);                                          // tlačítka „byl jsem" / „oblíbené"
     fillPhoto(site);                                           // zkus načíst fotku (z Wikimedia/Wikidata)
     document.getElementById('detail').classList.add('open');   // otevři panel
+    refreshMapAfterDetailChange(false);
   }
 
   // Sestaví odkaz na Wikipedii z OSM tagu „jazyk:Název"
@@ -2802,11 +3000,35 @@
     }
   }
 
+  // Safari na iPadu může při uspání aplikace zahodit obrázky mapy schované pod
+  // pravým panelem. Samotný posun pak dlaždice znovu nenačte, protože Leaflet je
+  // stále považuje za hotové. Po dokončení animace proto obnovíme rozměr, body
+  // i aktivní podkladovou vrstvu.
+  function refreshMapAfterDetailChange(reloadTiles){
+    if(!map) return;
+    const refresh=redraw=>{
+      if(!map) return;
+      map.invalidateSize({pan:false,animate:false});
+      if(redraw){
+        map.eachLayer(layer=>{
+          if(layer instanceof L.TileLayer && typeof layer.redraw==='function') layer.redraw();
+        });
+      }
+      scheduleVisibleRender();
+    };
+    requestAnimationFrame(()=>refresh(false));
+    clearTimeout(detailMapRefreshTimer);
+    detailMapRefreshTimer=setTimeout(()=>refresh(!!reloadTiles),260);
+  }
+
   // Zavře detailní panel
   function closeDetail(){
-    document.getElementById('detail').classList.remove('open'); // odeber třídu = panel zajede
+    const detail=document.getElementById('detail');
+    const wasOpen=detail.classList.contains('open');
+    detail.classList.remove('open');                            // odeber třídu = panel zajede
     activeId = null;                                            // není aktivní kemp
     scheduleViewSave();                                         // uživatel detail skutečně zavřel
+    if(wasOpen) refreshMapAfterDetailChange(true);               // doplň dlaždice dříve zakryté panelem
   }
 
   /* =========================================================================
@@ -3098,6 +3320,15 @@
       b.addEventListener('click', ()=> switchTab(b.getAttribute('data-tab')));
     });
     document.getElementById('resetFilters').addEventListener('click',resetCurrentFilters);
+    document.getElementById('exportBackup').addEventListener('click',downloadPersonalBackup);
+    document.getElementById('importBackup').addEventListener('click',()=>{
+      const input=document.getElementById('importBackupFile');
+      input.value='';
+      input.click();
+    });
+    document.getElementById('importBackupFile').addEventListener('change',event=>{
+      restorePersonalBackup(event.target.files&&event.target.files[0]);
+    });
     document.getElementById('clearFavorites').addEventListener('click',()=>clearMarksGlobally('fav'));
     document.getElementById('clearVisited').addEventListener('click',()=>clearMarksGlobally('visited'));
 
@@ -3119,6 +3350,13 @@
 
     // Klávesa Esc zavře detail
     document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDetail(); });
+    // Po návratu do uspáné aplikace obnov dlaždice, které mohl iPad uvolnit z paměti.
+    document.addEventListener('visibilitychange',()=>{
+      if(!document.hidden) refreshMapAfterDetailChange(true);
+    });
+    window.addEventListener('pageshow',event=>{
+      if(event.persisted) refreshMapAfterDetailChange(true);
+    });
     window.addEventListener('beforeunload',saveCurrentView);     // poslední pojistka před obnovením / zavřením
   }
 
