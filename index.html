@@ -1020,8 +1020,8 @@
   let detailMapRefreshTimer = 0; // dokončení překreslení mapy po zasunutí pravého detailu
   let stateRestoring = false;    // během obnovování nepřepisuj uložený stav výchozími hodnotami
   const LIST_LIMIT = 300;        // nejvýše tolik DOM řádků najednou (hlavně kvůli mobilům)
-  let activeId = null;          // ID právě otevřeného místa v detailu
-  let activeSite = null;        // objekt otevřeného místa pro trvalé zvýraznění
+  let activeId = null;          // ID vybraného místa (bublina, zvýraznění nebo detail)
+  let activeSite = null;        // vybrané místo pro trvalé zvýraznění
   let hoveredSite = null;       // bod, nad kterým je právě myš
   const tabFetchedAt = {};      // čas stažení dat pro každou záložku
   let bakedData = null;         // data načtená z přibaleného souboru (nebo null)
@@ -1107,6 +1107,9 @@
       const countryState={
         tab:TABS[source.tab] ? source.tab : 'camps',
         activeId:typeof source.activeId==='string' ? source.activeId : null,
+        activeView:['detail','popup','selected'].includes(source.activeView)
+          ? source.activeView
+          : (typeof source.activeId==='string' ? 'detail' : 'selected'),
         map:null,
         tabs:{}
       };
@@ -1238,7 +1241,7 @@
 
   function countryViewState(code=activeCountry){
     if(!viewState.countries[code] || typeof viewState.countries[code]!=='object'){
-      viewState.countries[code] = {tab:'camps',activeId:null,map:null,tabs:{}};
+      viewState.countries[code] = {tab:'camps',activeId:null,activeView:'selected',map:null,tabs:{}};
     }
     const state=viewState.countries[code];
     if(!state.tabs || typeof state.tabs!=='object') state.tabs={};
@@ -1279,6 +1282,11 @@
     const countryState=countryViewState();
     countryState.tab=activeTab;
     countryState.activeId=activeId;
+    countryState.activeView=activeId
+      ? (document.getElementById('detail').classList.contains('open')
+          ? 'detail'
+          : (openTapPopupId===activeId ? 'popup' : 'selected'))
+      : 'selected';
     captureActiveTabState();
     if(map){
       const center=map.getCenter();
@@ -1330,11 +1338,27 @@
   function restoreSavedDetail(){
     const countryState=countryViewState();
     const id=countryState.tab===activeTab ? countryState.activeId : null;
-    if(id && ALL.some(site=>site.id===id)) openDetail(id);
-    else{
+    const site=id ? ALL.find(item=>item.id===id) : null;
+    if(site){
+      const activeView=['detail','popup','selected'].includes(countryState.activeView)
+        ? countryState.activeView
+        : (usesTapPopup() ? 'popup' : 'detail');
+      if(activeView==='detail'){
+        openDetail(id);
+        return;
+      }
+      setActiveSite(site);
+      document.getElementById('detail').classList.remove('open');
+      if(activeView==='popup'&&usesTapPopup()){
+        requestAnimationFrame(()=>openTapPopupForSite(site));
+      }
+    }else{
       setActiveSite(null,false);
       document.getElementById('detail').classList.remove('open');
-      if(id) countryState.activeId=null;
+      if(id){
+        countryState.activeId=null;
+        countryState.activeView='selected';
+      }
     }
   }
   // Načtení mých editací
@@ -2665,7 +2689,10 @@
       openDetail(site.id);
     });
     m.on('popupopen',event=>{
-      if(tapPopup) openTapPopupId=site.id;
+      if(tapPopup){
+        openTapPopupId=site.id;
+        scheduleViewSave();
+      }
       const popup=event.popup.getElement();
       const button=popup&&popup.querySelector('[data-detail]');
       if(!button) return;
@@ -2680,6 +2707,7 @@
       // Po ručním zavření bubliny doplň body v části mapy odkryté auto-posunem.
       m.on('popupclose',()=>{
         if(openTapPopupId===site.id) openTapPopupId=null;
+        scheduleViewSave();
         requestAnimationFrame(()=>{
           if(!openTapPopupId) scheduleVisibleRender();
         });
@@ -2699,6 +2727,7 @@
       return;
     }
     openTapPopupId=site.id;
+    scheduleViewSave();
     const popup=L.popup({minWidth:210,closeButton:true,autoPan:true})
       .setLatLng([site.lat,site.lon])
       .setContent(popupHtml(site,true));
@@ -2717,6 +2746,7 @@
     });
     popup.on('remove',()=>{
       if(openTapPopupId===site.id) openTapPopupId=null;
+      scheduleViewSave();
     });
     popup.openOn(map);
   }
