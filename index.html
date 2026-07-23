@@ -490,15 +490,51 @@
       <!-- Výběr země; poslední volba se ukládá do prohlížeče -->
       <label id="countryWrap">Země
         <select id="country">
+          <option value="al">Albánie</option>
+          <option value="ad">Andorra</option>
+          <option value="be">Belgie</option>
+          <option value="by">Bělorusko</option>
+          <option value="ba">Bosna a Hercegovina</option>
+          <option value="bg">Bulharsko</option>
+          <option value="me">Černá Hora</option>
           <option value="cz">Česko</option>
+          <option value="dk">Dánsko</option>
+          <option value="ee">Estonsko</option>
+          <option value="fi">Finsko</option>
+          <option value="fr">Francie</option>
+          <option value="ge">Gruzie</option>
           <option value="hr">Chorvatsko</option>
+          <option value="ie">Irsko</option>
+          <option value="is">Island</option>
           <option value="it">Itálie</option>
+          <option value="xk">Kosovo</option>
+          <option value="cy">Kypr</option>
+          <option value="li">Lichtenštejnsko</option>
+          <option value="lt">Litva</option>
+          <option value="lv">Lotyšsko</option>
+          <option value="lu">Lucembursko</option>
+          <option value="hu">Maďarsko</option>
+          <option value="mt">Malta</option>
+          <option value="md">Moldavsko</option>
+          <option value="mc">Monako</option>
           <option value="de">Německo</option>
+          <option value="nl">Nizozemsko</option>
+          <option value="no">Norsko</option>
           <option value="pl">Polsko</option>
+          <option value="pt">Portugalsko</option>
           <option value="at">Rakousko</option>
+          <option value="ro">Rumunsko</option>
+          <option value="gr">Řecko</option>
+          <option value="mk">Severní Makedonie</option>
           <option value="sk">Slovensko</option>
           <option value="si">Slovinsko</option>
+          <option value="gb">Spojené království</option>
+          <option value="rs">Srbsko</option>
+          <option value="es">Španělsko</option>
+          <option value="se">Švédsko</option>
           <option value="ch">Švýcarsko</option>
+          <option value="tr">Turecko</option>
+          <option value="ua">Ukrajina</option>
         </select>
       </label>
       <!-- Stavový text o datech (naplní JS) -->
@@ -677,15 +713,51 @@
 
   // Země podporované aplikací. Název souboru je zároveň název JSONu pro offline režim.
   const COUNTRIES = {
-    cz:{label:'Česko',      iso:'CZ', slug:'cesko',      search:'Česko',      center:[49.82,15.47], zoom:7, nameTag:'name:cs'},
-    hr:{label:'Chorvatsko', iso:'HR', slug:'chorvatsko', search:'Hrvatska',   center:[44.30,15.60], zoom:7, nameTag:'name:hr'},
-    it:{label:'Itálie',     iso:'IT', slug:'italie',     search:'Italia',     center:[42.50,12.50], zoom:6, nameTag:'name:it'},
-    de:{label:'Německo',    iso:'DE', slug:'nemecko',    search:'Deutschland',center:[51.17,10.45], zoom:6, nameTag:'name:de'},
-    pl:{label:'Polsko',     iso:'PL', slug:'polsko',     search:'Polska',     center:[52.12,19.40], zoom:6, nameTag:'name:pl'},
-    at:{label:'Rakousko',   iso:'AT', slug:'rakousko',   search:'Österreich', center:[47.58,14.13], zoom:7, nameTag:'name:de'},
-    sk:{label:'Slovensko',  iso:'SK', slug:'slovensko',  search:'Slovensko',  center:[48.70,19.55], zoom:8, nameTag:'name:sk'},
-    si:{label:'Slovinsko',  iso:'SI', slug:'slovinsko',  search:'Slovenija',  center:[46.15,14.99], zoom:8, nameTag:'name:sl'},
-    ch:{label:'Švýcarsko',  iso:'CH', slug:'svycarsko',  search:'Schweiz',     center:[46.80,8.23], zoom:8, nameTag:'name:de'}
+    al:{label:'Albánie', iso:'AL', slug:'albanie', search:'Shqipëria', center:[41.15,20.17], zoom:8, nameTag:'name:sq'},
+    ad:{label:'Andorra', iso:'AD', slug:'andorra', search:'Andorra', center:[42.55,1.58], zoom:10, nameTag:'name:ca'},
+    be:{label:'Belgie', iso:'BE', slug:'belgie', search:'België', center:[50.50,4.47], zoom:8, nameTag:'name:nl'},
+    by:{label:'Bělorusko', iso:'BY', slug:'belorusko', search:'Беларусь', center:[53.70,27.95], zoom:6, nameTag:'name:be'},
+    ba:{label:'Bosna a Hercegovina', iso:'BA', slug:'bosna-a-hercegovina', search:'Bosna i Hercegovina', center:[44.17,17.68], zoom:7, nameTag:'name:bs'},
+    bg:{label:'Bulharsko', iso:'BG', slug:'bulharsko', search:'България', center:[42.73,25.49], zoom:7, nameTag:'name:bg'},
+    me:{label:'Černá Hora', iso:'ME', slug:'cerna-hora', search:'Crna Gora', center:[42.71,19.37], zoom:8, nameTag:'name:sr'},
+    cz:{label:'Česko', iso:'CZ', slug:'cesko', search:'Česko', center:[49.82,15.47], zoom:7, nameTag:'name:cs'},
+    dk:{label:'Dánsko', iso:'DK', slug:'dansko', search:'Danmark', center:[56.26,9.50], zoom:7, nameTag:'name:da'},
+    ee:{label:'Estonsko', iso:'EE', slug:'estonsko', search:'Eesti', center:[58.60,25.00], zoom:7, nameTag:'name:et'},
+    fi:{label:'Finsko', iso:'FI', slug:'finsko', search:'Suomi', center:[64.00,26.00], zoom:5, nameTag:'name:fi'},
+    fr:{label:'Francie', iso:'FR', slug:'francie', search:'France', center:[46.23,2.21], zoom:6, nameTag:'name:fr'},
+    ge:{label:'Gruzie', iso:'GE', slug:'gruzie', search:'საქართველო', center:[42.30,43.40], zoom:7, nameTag:'name:ka'},
+    hr:{label:'Chorvatsko', iso:'HR', slug:'chorvatsko', search:'Hrvatska', center:[44.30,15.60], zoom:7, nameTag:'name:hr'},
+    ie:{label:'Irsko', iso:'IE', slug:'irsko', search:'Ireland', center:[53.40,-8.20], zoom:7, nameTag:'name:en'},
+    is:{label:'Island', iso:'IS', slug:'island', search:'Ísland', center:[64.96,-19.00], zoom:6, nameTag:'name:is'},
+    it:{label:'Itálie', iso:'IT', slug:'italie', search:'Italia', center:[42.50,12.50], zoom:6, nameTag:'name:it'},
+    xk:{label:'Kosovo', iso:'XK', slug:'kosovo', search:'Kosovë', center:[42.60,20.90], zoom:8, nameTag:'name:sq'},
+    cy:{label:'Kypr', iso:'CY', slug:'kypr', search:'Κύπρος', center:[35.13,33.43], zoom:8, nameTag:'name:el'},
+    li:{label:'Lichtenštejnsko', iso:'LI', slug:'lichtenstejnsko', search:'Liechtenstein', center:[47.14,9.55], zoom:10, nameTag:'name:de'},
+    lt:{label:'Litva', iso:'LT', slug:'litva', search:'Lietuva', center:[55.17,23.88], zoom:7, nameTag:'name:lt'},
+    lv:{label:'Lotyšsko', iso:'LV', slug:'lotyssko', search:'Latvija', center:[56.88,24.60], zoom:7, nameTag:'name:lv'},
+    lu:{label:'Lucembursko', iso:'LU', slug:'lucembursko', search:'Luxembourg', center:[49.82,6.13], zoom:9, nameTag:'name:lb'},
+    hu:{label:'Maďarsko', iso:'HU', slug:'madarsko', search:'Magyarország', center:[47.16,19.50], zoom:7, nameTag:'name:hu'},
+    mt:{label:'Malta', iso:'MT', slug:'malta', search:'Malta', center:[35.94,14.38], zoom:10, nameTag:'name:mt'},
+    md:{label:'Moldavsko', iso:'MD', slug:'moldavsko', search:'Moldova', center:[47.20,28.50], zoom:7, nameTag:'name:ro'},
+    mc:{label:'Monako', iso:'MC', slug:'monako', search:'Monaco', center:[43.738,7.425], zoom:12, nameTag:'name:fr'},
+    de:{label:'Německo', iso:'DE', slug:'nemecko', search:'Deutschland', center:[51.17,10.45], zoom:6, nameTag:'name:de'},
+    nl:{label:'Nizozemsko', iso:'NL', slug:'nizozemsko', search:'Nederland', center:[52.13,5.29], zoom:7, nameTag:'name:nl'},
+    no:{label:'Norsko', iso:'NO', slug:'norsko', search:'Norge', center:[60.47,8.47], zoom:5, nameTag:'name:no'},
+    pl:{label:'Polsko', iso:'PL', slug:'polsko', search:'Polska', center:[52.12,19.40], zoom:6, nameTag:'name:pl'},
+    pt:{label:'Portugalsko', iso:'PT', slug:'portugalsko', search:'Portugal', center:[39.40,-8.20], zoom:6, nameTag:'name:pt'},
+    at:{label:'Rakousko', iso:'AT', slug:'rakousko', search:'Österreich', center:[47.58,14.13], zoom:7, nameTag:'name:de'},
+    ro:{label:'Rumunsko', iso:'RO', slug:'rumunsko', search:'România', center:[45.94,24.97], zoom:7, nameTag:'name:ro'},
+    gr:{label:'Řecko', iso:'GR', slug:'recko', search:'Ελλάδα', center:[39.07,21.82], zoom:6, nameTag:'name:el'},
+    mk:{label:'Severní Makedonie', iso:'MK', slug:'severni-makedonie', search:'Северна Македонија', center:[41.61,21.75], zoom:8, nameTag:'name:mk'},
+    sk:{label:'Slovensko', iso:'SK', slug:'slovensko', search:'Slovensko', center:[48.70,19.55], zoom:8, nameTag:'name:sk'},
+    si:{label:'Slovinsko', iso:'SI', slug:'slovinsko', search:'Slovenija', center:[46.15,14.99], zoom:8, nameTag:'name:sl'},
+    gb:{label:'Spojené království', iso:'GB', slug:'spojene-kralovstvi', search:'United Kingdom', center:[54.00,-2.00], zoom:6, nameTag:'name:en'},
+    rs:{label:'Srbsko', iso:'RS', slug:'srbsko', search:'Србија', center:[44.00,21.00], zoom:7, nameTag:'name:sr'},
+    es:{label:'Španělsko', iso:'ES', slug:'spanelsko', search:'España', center:[40.46,-3.75], zoom:6, nameTag:'name:es'},
+    se:{label:'Švédsko', iso:'SE', slug:'svedsko', search:'Sverige', center:[60.13,18.64], zoom:5, nameTag:'name:sv'},
+    ch:{label:'Švýcarsko', iso:'CH', slug:'svycarsko', search:'Schweiz', center:[46.80,8.23], zoom:8, nameTag:'name:de'},
+    tr:{label:'Turecko', iso:'TR', slug:'turecko', search:'Türkiye', center:[39.00,35.00], zoom:6, nameTag:'name:tr'},
+    ua:{label:'Ukrajina', iso:'UA', slug:'ukrajina', search:'Україна', center:[49.00,32.00], zoom:6, nameTag:'name:uk'}
   };
   let activeCountry = 'cz';                 // výchozí země; uložená volba se načte při startu
 
