@@ -122,12 +122,29 @@
     #filterActionButtons{display:flex;align-items:center;gap:6px;margin-left:auto}
     #resetFilters{padding:5px 9px;font-size:11px;white-space:nowrap}
 
-    /* Vyhledávací pole */
+    /* Vyhledávací pole + samostatné spuštění hledání města/adresy */
+    #searchRow{display:flex;align-items:stretch;gap:6px;position:relative}
     #search{
-      width:100%;padding:9px 11px;border-radius:9px;    /* velikost a zaoblení */
+      width:100%;min-width:0;padding:9px 11px;border-radius:9px; /* velikost a zaoblení */
       background:var(--bg);border:1px solid var(--line);color:var(--ink);font-size:13px; /* vzhled */
     }
     #search::placeholder{color:var(--muted)}             /* barva nápovědného textu */
+    #searchPlace{padding:7px 9px;white-space:nowrap;border-color:rgba(96,165,250,.55);color:#bfdbfe}
+    #searchPlace:disabled{opacity:.55;cursor:wait}
+    #placeResults{
+      margin-top:6px;border:1px solid var(--line);border-radius:9px;background:var(--bg);
+      max-height:210px;overflow:auto;box-shadow:0 8px 24px rgba(0,0,0,.35)
+    }
+    .place-result{
+      display:block;width:100%;padding:8px 10px;text-align:left;background:none;border:0;
+      border-bottom:1px solid var(--line);color:var(--ink);cursor:pointer;font-size:11.5px;line-height:1.35
+    }
+    .place-result:last-of-type{border-bottom:0}
+    .place-result:hover,.place-result:focus{background:var(--panel-2);outline:none}
+    .place-result small{display:block;color:var(--muted);margin-top:2px}
+    .place-search-status{padding:9px 10px;color:var(--muted);font-size:11.5px;line-height:1.4}
+    .place-search-credit{padding:5px 10px;color:var(--muted);font-size:9.5px;border-top:1px solid var(--line)}
+    .place-search-credit a{color:inherit}
     #search:focus{outline:none;border-color:var(--sea)}  /* zvýraznění při psaní */
 
     /* Řádek s ovládacími prvky filtrů */
@@ -322,6 +339,14 @@
     .zone-popup .zone-rule{font-size:11.5px;margin:3px 0}
     .zone-popup .zone-note{font-size:10.5px;color:#64748b;margin-top:8px}
     .zone-popup a{color:#0369a1}
+    .place-search-marker{
+      width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);
+      background:#2563eb;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.55)
+    }
+    .place-search-marker::after{
+      content:'';position:absolute;width:8px;height:8px;border-radius:50%;background:#fff;
+      left:7px;top:7px
+    }
     .popup-detail-btn{
       cursor:pointer;background:#13252c;color:#e9f1f2;border:1px solid #20363f;
       border-radius:7px;padding:6px 10px;font-size:12px;margin-top:6px;
@@ -357,6 +382,12 @@
     .drow{margin-bottom:12px}
     .drow .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:3px} /* popisek */
     .drow .v{font-size:13.5px;line-height:1.4}                 /* hodnota */
+    .place-id-line{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+    .place-id-code{
+      display:inline-block;max-width:100%;overflow-wrap:anywhere;padding:4px 7px;border-radius:6px;
+      background:var(--bg);border:1px solid var(--line);color:var(--sea);font-size:11px
+    }
+    .copy-place-id{padding:4px 8px;font-size:10.5px}
 
     /* Blok odkazových tlačítek */
     .links{display:flex;flex-direction:column;gap:7px}
@@ -615,8 +646,12 @@
               <button id="resetFilters" class="btn" type="button" title="Vypnout všechny filtry v aktuální záložce">↺ Reset filtrů</button>
             </div>
           </div>
-          <!-- Vyhledávací pole podle názvu / města -->
-          <input id="search" type="text" placeholder="Hledat název nebo město…">
+          <!-- Psaní filtruje naše body; Enter/tlačítko navíc umí ID, město nebo adresu -->
+          <div id="searchRow">
+            <input id="search" type="search" autocomplete="off" spellcheck="false" placeholder="Filtrovat body, ID nebo město…">
+            <button id="searchPlace" class="btn" type="button" title="Najít ID, město nebo adresu a zobrazit je na mapě">⌕ Místo</button>
+          </div>
+          <div id="placeResults" hidden></div>
 
           <!-- Filtry KEMPŮ -->
           <div class="frow" id="campChips">
@@ -1009,6 +1044,10 @@
   let pointsEnabled = safeGet(POINTS_KEY, true) !== false; // výchozí stav je zapnuto
   let nominatimPending = false; // ochrana veřejného geokodéru před souběžnými požadavky
   let lastNominatimAt = 0;      // Nominatim dovoluje nejvýše jeden požadavek za sekundu
+  let nominatimQueue = Promise.resolve(); // společná fronta hledání i zjišťování adres
+  let placeSearchPending = false; // právě se hledá město/adresa?
+  let placeSearchResults = [];    // nabídnuté výsledky Nominatim
+  let placeSearchMarker = null;   // dočasná značka města/adresy mimo naše objekty
   const markerById = {};        // rychlý přístup ke značce podle ID
   const listItemById = {};      // viditelný řádek levého seznamu podle ID
   let hoverPreviewMarker = null; // dočasný přesný bod, když je místo uvnitř shluku
@@ -2036,6 +2075,8 @@
     if(!COUNTRIES[code]) code = 'cz';
     if(!initial && code===activeCountry) return;
     if(!initial) saveCurrentView();
+    clearPlaceSearchMarker();                                  // hledaný externí bod patřil předchozí zemi
+    hidePlaceSearchResults();
     stateRestoring=true;
     activeCountry = code;
     safeSet(COUNTRY_KEY, activeCountry);
@@ -3245,6 +3286,54 @@
     return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q); // odkaz na hledání adresy
   }
 
+  // Jednoznačný kód aplikace obsahuje zemi, záložku i původní OSM/syntetické ID.
+  // Samotné node/123 nestačí, protože stejný objekt může patřit do více záložek.
+  function placeLocator(site, country=activeCountry, tab=activeTab){
+    return country+':'+tab+':'+site.id;
+  }
+
+  function parsePlaceLocator(value){
+    const match=String(value||'').trim().match(/^([a-z]{2}):([a-z][a-z0-9_-]*):(.+)$/i);
+    if(!match) return null;
+    const country=match[1].toLowerCase();
+    const tab=match[2].toLowerCase();
+    const id=match[3].trim();
+    if(!COUNTRIES[country]||!TABS[tab]) return null;
+    if(!/^(?:node|way|relation)\/\d+$/i.test(id)&&!/^film\/.+/i.test(id)) return null;
+    return {country,tab,id};
+  }
+
+  function placeLocatorRow(site){
+    const locator=placeLocator(site);
+    return `<div class="drow">
+      <div class="k">ID místa <span style="text-transform:none;letter-spacing:0">(lze vložit do vyhledávače)</span></div>
+      <div class="v place-id-line">
+        <code class="place-id-code">${esc(locator)}</code>
+        <button class="btn copy-place-id" type="button" data-place-locator="${esc(locator)}">Kopírovat</button>
+      </div>
+    </div>`;
+  }
+
+  async function copyText(value){
+    try{
+      if(navigator.clipboard&&window.isSecureContext){
+        await navigator.clipboard.writeText(value);
+      }else{
+        const area=document.createElement('textarea');
+        area.value=value; area.setAttribute('readonly','');
+        area.style.cssText='position:fixed;left:-9999px;top:0';
+        document.body.appendChild(area); area.select();
+        document.execCommand('copy'); area.remove();
+      }
+      toast('ID místa zkopírováno');
+    }catch(e){ window.prompt('Zkopíruj ID místa:',value); }
+  }
+
+  function wirePlaceLocator(){
+    const button=document.querySelector('.copy-place-id[data-place-locator]');
+    if(button) button.onclick=()=>copyText(button.getAttribute('data-place-locator'));
+  }
+
   /* =========================================================================
      DETAILNÍ PANEL
      ========================================================================= */
@@ -3292,6 +3381,8 @@
         <div class="k">Typ • Oblast</div>
         <div class="v">${site.kind==='caravan_site'?'Stellplatz / caravan':'Kemp'} • ${esc(site.region)}</div>
       </div>
+
+      ${placeLocatorRow(site)}
 
       <!-- Adresa (z OSM, nebo dohledá se přes tlačítko) — klikatelná = hledání na Google Maps -->
       <div class="drow">
@@ -3369,6 +3460,7 @@
     // Navěš tlačítko uložení mých editací
     document.getElementById('saveBtn').onclick = ()=> saveDetail(id); // uloží a překreslí
 
+    wirePlaceLocator();                                         // kopírování jednoznačného ID místa
     wireMarkBtns(id);                                          // tlačítka „byl jsem" / „oblíbené"
     fillPhoto(site);                                           // zkus načíst fotku (z Wikimedia/Wikidata)
 
@@ -3400,6 +3492,8 @@
         <div class="k">Kategorie • Oblast</div>
         <div class="v">${esc(cat)} • ${esc(site.region)}</div>
       </div>
+
+      ${placeLocatorRow(site)}
 
       ${filmRow}
 
@@ -3453,6 +3547,7 @@
     const geoBtn = document.getElementById('geoBtn');          // tlačítko dohledání adresy
     if(geoBtn) geoBtn.onclick = ()=> reverseGeocode(site);     // navěš
     document.getElementById('saveBtn').onclick = ()=> saveDetail(id); // uložení
+    wirePlaceLocator();                                         // kopírování jednoznačného ID místa
     wireMarkBtns(id);                                          // tlačítka „byl jsem" / „oblíbené"
     fillPhoto(site);                                           // zkus načíst fotku (z Wikimedia/Wikidata)
     document.getElementById('detail').classList.add('open');   // otevři panel
@@ -3734,6 +3829,19 @@
     toast('Uloženo ✔');                                       // potvrzení
   }
 
+  // Veřejný Nominatim dovoluje nejvýše jeden požadavek za sekundu. Hledání
+  // i zjišťování adres proto sdílí jednu frontu a nikdy neběží souběžně.
+  function runNominatimRequest(request){
+    const queued=nominatimQueue.catch(()=>{}).then(async()=>{
+      const wait=Math.max(0,1100-(Date.now()-lastNominatimAt));
+      if(wait) await sleep(wait);
+      lastNominatimAt=Date.now();
+      return request();
+    });
+    nominatimQueue=queued.catch(()=>{});
+    return queued;
+  }
+
   // Reverzní geokódování přes Nominatim: ze souřadnic zjistí adresu (na vyžádání)
   async function reverseGeocode(site){
     if(nominatimPending) return;                               // jeden požadavek v jeden okamžik
@@ -3741,12 +3849,10 @@
     const box = document.getElementById('addrBox');            // místo, kam adresu vypíšeme
     if(box) box.innerHTML = '<span style="color:var(--muted)">Zjišťuji adresu…</span>'; // dočasný text
     try{
-      const wait = Math.max(0, 1000 - (Date.now() - lastNominatimAt));
-      if(wait) await sleep(wait);                              // dodrž maximálně 1 požadavek/s
-      lastNominatimAt = Date.now();
       const url = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2'
         + '&lat='+site.lat+'&lon='+site.lon+'&zoom=18&accept-language=cs'; // sestavená URL dotazu
-      const res = await fetch(url, {headers:{'Accept':'application/json'}}); // odešli požadavek
+      const res = await runNominatimRequest(()=>fetch(url,{headers:{'Accept':'application/json'}})); // fronta + požadavek
+      if(!res.ok) throw new Error('Nominatim HTTP '+res.status);
       const j = await res.json();                              // rozparsuj odpověď
       const addr = j.display_name || 'Adresu se nepodařilo určit'; // získaná adresa
       const u = USER[site.id] || {};                           // moje editace
@@ -3947,6 +4053,173 @@
     }
   }
 
+  /* =========================================================================
+     PŘESNÉ ID MÍSTA + HLEDÁNÍ MĚST A ADRES
+     ========================================================================= */
+
+  function hidePlaceSearchResults(){
+    const box=document.getElementById('placeResults');
+    if(!box) return;
+    box.hidden=true;
+    box.innerHTML='';
+    placeSearchResults=[];
+  }
+
+  function showPlaceSearchStatus(message,danger=false){
+    const box=document.getElementById('placeResults');
+    box.innerHTML='<div class="place-search-status"'+(danger?' style="color:var(--danger)"':'')+'>'+esc(message)+'</div>';
+    box.hidden=false;
+  }
+
+  function clearPlaceSearchMarker(){
+    if(placeSearchMarker&&map) map.removeLayer(placeSearchMarker);
+    placeSearchMarker=null;
+  }
+
+  function stopFollowingForSearch(){
+    followingLocation=false;                                   // hledaný výsledek nesmí GPS hned odsunout
+    if(followEl) followEl.classList.remove('active');           // GPS samotná zůstane zapnutá
+  }
+
+  function renderPlaceSearchResults(results){
+    const box=document.getElementById('placeResults');
+    placeSearchResults=results.slice(0,6);
+    if(!placeSearchResults.length){
+      showPlaceSearchStatus('V podporovaných zemích nebylo nic nalezeno.');
+      return;
+    }
+    box.innerHTML=placeSearchResults.map((result,index)=>{
+      const type=[result.type,result.address&&result.address.country].filter(Boolean).join(' • ');
+      return '<button class="place-result" type="button" data-place-index="'+index+'">'
+        +esc(result.display_name||'Nalezené místo')
+        +(type?'<small>'+esc(type)+'</small>':'')
+        +'</button>';
+    }).join('')
+      +'<div class="place-search-credit">Výsledky © '
+      +'<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></div>';
+    box.hidden=false;
+    box.querySelectorAll('[data-place-index]').forEach(button=>{
+      button.onclick=()=>selectPlaceSearchResult(Number(button.getAttribute('data-place-index')));
+    });
+  }
+
+  async function navigateToPlaceLocator(locator){
+    const input=document.getElementById('search');
+    clearTimeout(filterTimer);
+    input.value='';                                             // kód není běžný textový filtr
+    hidePlaceSearchResults();
+    clearPlaceSearchMarker();
+    applyFilters();                                             // do uloženého stavu původní záložky neukládej kód
+    stopFollowingForSearch();
+    try{
+      if(locator.country!==activeCountry) await switchCountry(locator.country,false);
+      if(locator.tab!==activeTab) await switchTab(locator.tab);
+      input.value='';                                           // odstraň případné uložené hledání cílové záložky
+      applyFilters();
+      const wanted=locator.id.toLowerCase();
+      const site=ALL.find(item=>String(item.id).toLowerCase()===wanted);
+      if(!site){
+        showPlaceSearchStatus('Objekt s tímto ID už v aktuálních datech není.',true);
+        return;
+      }
+      // Ostatní filtry uživateli nemažeme. Pokud cíl některý z nich nesplňuje,
+      // do aktuálního výsledku jej přidáme jako jedinou výjimku.
+      if(!FILTERED.some(item=>item.id===site.id)){
+        FILTERED=[site,...FILTERED];
+        renderList(FILTERED);
+        renderMarkers(FILTERED);
+      }
+      focusSite(site.id);                                       // desktop: detail, mobil: bublina
+    }catch(e){
+      console.error(e);
+      showPlaceSearchStatus('Místo se nepodařilo načíst. Zkontroluj připojení a zkus to znovu.',true);
+    }
+  }
+
+  async function searchExternalPlace(query){
+    if(placeSearchPending) return;
+    if(query.length<2){
+      showPlaceSearchStatus('Napiš alespoň dva znaky.');
+      return;
+    }
+    placeSearchPending=true;
+    const button=document.getElementById('searchPlace');
+    button.disabled=true;
+    showPlaceSearchStatus('Hledám město nebo adresu…');
+    try{
+      const params=new URLSearchParams({
+        format:'jsonv2',q:query,addressdetails:'1',
+        limit:'12','accept-language':'cs'
+      });
+      const response=await runNominatimRequest(()=>fetch(
+        'https://nominatim.openstreetmap.org/search?'+params,
+        {headers:{'Accept':'application/json'}}
+      ));
+      if(!response.ok) throw new Error('Nominatim HTTP '+response.status);
+      const json=await response.json();
+      // Aplikace má data jen pro podporované země. Nepoužitelné výsledky proto
+      // nezobrazujeme, aby mapa a rozbalovací seznam země nebyly v rozporu.
+      const supported=(Array.isArray(json)?json:[]).filter(result=>{
+        const code=String(result.address&&result.address.country_code||'').toLowerCase();
+        return !!COUNTRIES[code];
+      });
+      renderPlaceSearchResults(supported);
+    }catch(e){
+      console.error(e);
+      showPlaceSearchStatus('Vyhledávání je teď nedostupné. Zkus to znovu za chvíli.',true);
+    }finally{
+      placeSearchPending=false;
+      button.disabled=false;
+    }
+  }
+
+  async function selectPlaceSearchResult(index){
+    const result=placeSearchResults[index];
+    if(!result) return;
+    const lat=Number(result.lat),lon=Number(result.lon);
+    if(!Number.isFinite(lat)||!Number.isFinite(lon)) return;
+    const code=String(result.address&&result.address.country_code||'').toLowerCase();
+    hidePlaceSearchResults();
+    clearPlaceSearchMarker();
+    stopFollowingForSearch();
+    const input=document.getElementById('search');
+    clearTimeout(filterTimer);
+    input.value='';
+    applyFilters();                                             // seznam se vrátí k našim objektům
+    if(COUNTRIES[code]&&code!==activeCountry) await switchCountry(code,false);
+    closeDetail();
+    const bb=Array.isArray(result.boundingbox) ? result.boundingbox.map(Number) : [];
+    if(bb.length===4&&bb.every(Number.isFinite)&&bb[0]<bb[1]&&bb[2]<bb[3]){
+      map.fitBounds([[bb[0],bb[2]],[bb[1],bb[3]]],{padding:[28,28],maxZoom:14});
+    }else{
+      map.setView([lat,lon],14);
+    }
+    const icon=L.divIcon({
+      className:'',html:'<div class="place-search-marker"></div>',
+      iconSize:[28,28],iconAnchor:[14,28],popupAnchor:[0,-28]
+    });
+    placeSearchMarker=L.marker([lat,lon],{icon,zIndexOffset:1200})
+      .addTo(map)
+      .bindPopup('<div style="max-width:250px;font-family:system-ui;font-size:12px">'+esc(result.display_name||'Nalezené místo')+'</div>');
+    placeSearchMarker.openPopup();
+    if(window.innerWidth<=760) closeSidebar();
+  }
+
+  function submitMapSearch(){
+    const query=document.getElementById('search').value.trim();
+    if(!query){ hidePlaceSearchResults(); return; }
+    const locator=parsePlaceLocator(query);
+    if(locator){
+      navigateToPlaceLocator(locator);
+      return;
+    }
+    if(/^[a-z]{2}:[a-z][a-z0-9_-]*:/i.test(query)){
+      showPlaceSearchStatus('ID nemá platný formát nebo odkazuje na nepodporovanou zemi či záložku.',true);
+      return;
+    }
+    searchExternalPlace(query);
+  }
+
   // Vzhled podle aktivní záložky: akcentní barva, tlačítka, filtry, legenda
   function updateTabUI(){
     const cfg = activeCfg();                                 // konfigurace aktivní záložky
@@ -3973,7 +4246,9 @@
     // Popisek počtu
     document.getElementById('countNoun').textContent = cfg.noun;
     // Placeholder hledání
-    document.getElementById('search').placeholder = poi ? 'Hledat název nebo město…' : 'Hledat kemp nebo město…';
+    document.getElementById('search').placeholder = poi
+      ? 'Filtrovat body, ID nebo město…'
+      : 'Filtrovat kempy, ID nebo město…';
   }
 
   // Vygeneruje filtrovací chipy pro POI záložku (speciální + kategorie)
@@ -4064,9 +4339,16 @@
     document.getElementById('country').addEventListener('change', function(){ switchCountry(this.value, false); });
     // Vyhledávací pole: filtruj při psaní
     document.getElementById('search').addEventListener('input', ()=>{
+      hidePlaceSearchResults();                               // stará nabídka už neodpovídá novému textu
       clearTimeout(filterTimer);
       filterTimer=setTimeout(applyFilters,220);
     });
+    document.getElementById('search').addEventListener('keydown',event=>{
+      if(event.key!=='Enter') return;
+      event.preventDefault();
+      submitMapSearch();                                      // ID nebo jednorázové hledání města/adresy
+    });
+    document.getElementById('searchPlace').addEventListener('click',submitMapSearch);
     // Změna oblasti / hvězd: přefiltruj
     document.getElementById('region').addEventListener('change', applyFilters);
     document.getElementById('stars').addEventListener('change', applyFilters);
@@ -4137,7 +4419,12 @@
     document.getElementById('sbBackdrop').addEventListener('click', closeSidebar);
 
     // Klávesa Esc zavře detail
-    document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeDetail(); });
+    document.addEventListener('keydown', e=>{
+      if(e.key!=='Escape') return;
+      const results=document.getElementById('placeResults');
+      if(results&&!results.hidden){ hidePlaceSearchResults(); return; }
+      closeDetail();
+    });
     // Po návratu do uspáné aplikace obnov dlaždice, které mohl iPad uvolnit z paměti.
     document.addEventListener('visibilitychange',()=>{
       if(!document.hidden){
