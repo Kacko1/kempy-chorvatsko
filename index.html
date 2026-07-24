@@ -2409,6 +2409,11 @@
       scheduleVisibleRender();
       scheduleViewSave();
     });
+    // Obyčejné klepnutí do mapy zruší dočasný výsledek hledání.
+    // Tažení mapy ani změna přiblížení událost click nevyvolají, takže šipka zůstane.
+    map.on('click',()=>{
+      if(placeSearchMarker) clearPlaceSearchMarker();
+    });
     map.on('baselayerchange',event=>{
       safeSet(BASE_LAYER_KEY,event.layer===street ? 'street' : 'satellite');
     });
@@ -2825,6 +2830,7 @@
       });
     }
     m.on('click',()=>{
+      clearPlaceSearchMarker();                                // uživatel zvolil jiný bod
       if(tapPopup){
         setActiveSite(site);
         scheduleViewSave();
@@ -2960,6 +2966,7 @@
         if(props.cluster){
           const m=L.marker([lat,lon],{icon:clusterCountIcon(props.point_count),keyboard:false});
           m.on('click',()=>{
+            clearPlaceSearchMarker();                          // kliknutí na jinou část mapy ruší hledanou šipku
             const next=Math.min(map.getMaxZoom(),spatialIndex.getClusterExpansionZoom(props.cluster_id));
             map.flyTo([lat,lon],next,{duration:.45});
           });
@@ -3123,6 +3130,7 @@
   function focusSite(id){
     const site = ALL.find(s=>s.id===id);                        // najdi kemp podle ID
     if(!site) return;                                           // pojistka
+    clearPlaceSearchMarker();                                   // výběr našeho objektu nahrazuje hledané město
     const tapPopup=usesTapPopup();
     if(tapPopup){
       // Pokud byl otevřený starší detail, nejdřív jej zasuň. Nově vybrané místo
@@ -4198,7 +4206,7 @@
       className:'',html:'<div class="place-search-marker"></div>',
       iconSize:[28,28],iconAnchor:[14,28],popupAnchor:[0,-28]
     });
-    placeSearchMarker=L.marker([lat,lon],{icon,zIndexOffset:1200})
+    placeSearchMarker=L.marker([lat,lon],{icon,zIndexOffset:1200,bubblingMouseEvents:false})
       .addTo(map)
       .bindPopup('<div style="max-width:250px;font-family:system-ui;font-size:12px">'+esc(result.display_name||'Nalezené místo')+'</div>');
     placeSearchMarker.openPopup();
