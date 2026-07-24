@@ -2560,6 +2560,27 @@
     let suppressClickUntil=0;
     let lastRightClick=null;
 
+    const applyTouchZoom=()=>{
+      if(!touchZoom) return;
+      touchZoom.frame=0;
+      const targetZoom=touchZoom.pendingZoom;
+      if(!Number.isFinite(targetZoom)||Math.abs(targetZoom-map.getZoom())<.001) return;
+      const viewHalf=map.getSize().divideBy(2);
+      const center=map.unproject(
+        map.project(touchZoom.anchorLatLng,targetZoom)
+          .subtract(touchZoom.anchor.subtract(viewHalf)),
+        targetZoom
+      );
+      if(!touchZoom.moveStarted){
+        map._moveStart(true,false);
+        touchZoom.moveStarted=true;
+      }
+      touchZoom.center=center;
+      // Stejný průběžný pohyb používá Leaflet při přibližování dvěma prsty.
+      // Události moveend/zoomend tak proběhnou až po puštění prstu.
+      map._move(center,targetZoom,{pinch:true,round:false});
+    };
+
     container.addEventListener('pointerdown',event=>{
       // Primární levé tlačítko odpovídá prstu, peru i levému tlačítku myši.
       // Není tak závislé na tom, jak konkrétní mobilní prohlížeč označí pointerType.
@@ -2572,9 +2593,13 @@
         event.stopImmediatePropagation();
         const dragWasEnabled=!!(map.dragging&&map.dragging.enabled());
         if(dragWasEnabled) map.dragging.disable();
+        const anchor=map.mouseEventToContainerPoint(event);
+        map._stop();
         touchZoom={
           pointerId:event.pointerId,startY:event.clientY,startZoom:map.getZoom(),
-          anchor:map.mouseEventToContainerPoint(event),moved:false,dragWasEnabled
+          anchor,anchorLatLng:map.containerPointToLatLng(anchor),
+          moved:false,dragWasEnabled,pendingZoom:map.getZoom(),frame:0,
+          moveStarted:false,center:null
         };
         lastTap=null;
         tapCandidate=null;
@@ -2594,8 +2619,10 @@
         if(Math.abs(dy)>6) touchZoom.moved=true;
         if(touchZoom.moved){
           // Google Maps: dolů = přiblížit, nahoru = oddálit.
-          const targetZoom=clampZoom(Math.round((touchZoom.startZoom+dy/85)*4)/4);
-          if(Math.abs(targetZoom-map.getZoom())>=.12) map.setZoomAround(touchZoom.anchor,targetZoom);
+          // Desetinný zoom se nezaokrouhluje na pevné kroky. Překreslení nejvýše
+          // jednou za snímek udrží gesto plynulé i na slabším telefonu.
+          touchZoom.pendingZoom=clampZoom(touchZoom.startZoom+dy/100);
+          if(!touchZoom.frame) touchZoom.frame=requestAnimationFrame(applyTouchZoom);
         }
         return;
       }
@@ -2609,8 +2636,21 @@
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
+        if(touchZoom.frame){
+          cancelAnimationFrame(touchZoom.frame);
+          touchZoom.frame=0;
+          applyTouchZoom();
+        }
         if(!touchZoom.moved){
           map.setZoomAround(touchZoom.anchor,clampZoom(touchZoom.startZoom+1));
+        }else{
+          const targetZoom=clampZoom(touchZoom.pendingZoom);
+          const center=touchZoom.center||map.getCenter();
+          if(map.options.zoomAnimation){
+            map._animateZoom(center,targetZoom,true,map.options.zoomSnap);
+          }else{
+            map._resetView(center,targetZoom);
+          }
         }
         try{ container.releasePointerCapture(event.pointerId); }catch(e){}
         if(touchZoom.dragWasEnabled) map.dragging.enable();
@@ -2630,6 +2670,16 @@
     container.addEventListener('pointerup',finishTouch,{capture:true,passive:false});
     container.addEventListener('pointercancel',event=>{
       if(touchZoom&&event.pointerId===touchZoom.pointerId){
+        if(touchZoom.frame){
+          cancelAnimationFrame(touchZoom.frame);
+          touchZoom.frame=0;
+          applyTouchZoom();
+        }
+        if(touchZoom.moved){
+          const targetZoom=clampZoom(touchZoom.pendingZoom);
+          const center=touchZoom.center||map.getCenter();
+          map._resetView(center,targetZoom);
+        }
         if(touchZoom.dragWasEnabled) map.dragging.enable();
         touchZoom=null;
       }
@@ -2666,7 +2716,7 @@
     const cc = countryCfg();
     document.getElementById('body').classList.toggle('sb-collapsed',!!safeGet(SIDEBAR_KEY,false));
     map = L.map('map', {
-      zoomControl:true,maxZoom:19,doubleClickZoom:true,zoomSnap:.25,zoomDelta:1
+      zoomControl:true,maxZoom:19,doubleClickZoom:true,zoomSnap:0,zoomDelta:1
     }).setView(cc.center, cc.zoom);                              // střed a zoom
     installMapGestures();
 
