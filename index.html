@@ -1102,32 +1102,167 @@
   }
 
   /* =========================================================================
-     FILMOVÁ MÍSTA — curated seznam (ověřeno na webu). „film" = true.
-     Coords jsou u známých památek přesné; u vesnic/řek jde o oblast.
+     FILMOVÁ MÍSTA — ručně ověřený seznam uložený mimo týdenní OSM JSONy.
+     Proto se po každém načtení přidá znovu a automatická aktualizace ho nepřepíše.
+     Souřadnice označují návštěvnicky rozpoznatelné místo, ne filmové studio.
      ========================================================================= */
+  const FILM_SOURCE_URLS = {
+    hrGot:'https://filmingincroatia.hr/movies/game-of-thrones-season-5/',
+    hrSw:'https://filmingincroatia.hr/movies/star-wars-the-last-jedi/',
+    hrSplit:'https://visitsplit.com/clients/1/uploads/GAME_OF_THRONES_SPLIT.PDF',
+    hrSibenik:'https://www.visitsibenik.hr/stranice/game-of-thrones-lokacije/49/en.html',
+    es:'https://www.spain.info/en/discover-spain/spain-screen-tourism/',
+    esSolo:'https://www.spain.info/export/sites/segtur/.content/Folletos/folletos/espana-pelicula-EN.pdf',
+    is:'https://www.icelandtours.is/blog/movies-and-tv-shows-filmed-in-iceland/',
+    mt:'https://www.visitmalta.com/en/malta-in-movies/',
+    gbGot:'https://discovernorthernireland.com/things-to-do/tv-and-film/game-of-thrones/',
+    gbPuzzlewood:'https://www.visitdeanwye.co.uk/film-and-tv/star-wars',
+    gbGreenham:'https://greenham.gov.uk/greenham-common-bunkers',
+    ie:'https://www.ireland.com/en-us/plan-your-trip/trip-ideas/star-wars/',
+    it:'https://www.italia.it/en/lombardy/como/villa-del-balbianello',
+    itSolo:'https://www.italyformovies.it/film-serie-tv-games/detail/6807/solo-a-star-wars-story',
+    no:'https://www.starwars.com/news/hoth-behind-the-scenes',
+    ch:'https://jungfrauregion.swiss/de/destination/magazin/detail/hollywood-oder-die-jungfrau-region.html'
+  };
+
   const FILM_SITES = [
-    {name:'Pevnost Lovrijenac (Dubrovník)', lat:42.6404, lon:18.1052, films:['Game of Thrones — Rudá bašta / King\u2019s Landing']},
-    {name:'Hradby a Staré Město Dubrovník', lat:42.6414, lon:18.1074, films:['Game of Thrones — King\u2019s Landing','Star Wars: Poslední z Jediů — Canto Bight','Robin Hood (2018)']},
-    {name:'Věž Minčeta (Dubrovník)', lat:42.6421, lon:18.1085, films:['Game of Thrones — Dům nesmrtelných']},
-    {name:'Jezuitské schody (Dubrovník)', lat:42.6398, lon:18.1101, films:['Game of Thrones — Cersein pochod hanby']},
-    {name:'Park Gradac (Dubrovník)', lat:42.6389, lon:18.1030, films:['Game of Thrones — Purpurová svatba']},
-    {name:'Knížecí palác (Dubrovník)', lat:42.6403, lon:18.1109, films:['Game of Thrones — Qarth']},
-    {name:'Ostrov Lokrum', lat:42.6247, lon:18.1181, films:['Game of Thrones — Qarth']},
-    {name:'Arboretum Trsteno', lat:42.7167, lon:17.9640, films:['Game of Thrones — zahrady Rudé bašty']},
-    {name:'Diokleciánův palác — sklepy (Split)', lat:42.5081, lon:16.4402, films:['Game of Thrones — trůnní sál Meereenu']},
-    {name:'Pevnost Klis', lat:43.5563, lon:16.5225, films:['Game of Thrones — Meereen']},
-    {name:'Žrnovnica (u Splitu)', lat:43.5230, lon:16.5490, films:['Game of Thrones — okolí Meereenu']},
-    {name:'Kaštel Gomilica', lat:43.5490, lon:16.3895, films:['Game of Thrones — Braavos']},
-    {name:'Katedrála sv. Jakuba (Šibenik)', lat:43.7360, lon:15.8895, films:['Game of Thrones — Železná banka Braavosu']},
-    {name:'Klášter sv. Dominika (Trogir)', lat:43.5163, lon:16.2513, films:['Game of Thrones — interiéry Qarthu']},
-    {name:'Komiža (ostrov Vis)', lat:43.0456, lon:16.0894, films:['Mamma Mia! Here We Go Again']},
-    {name:'Město Vis', lat:43.0619, lon:16.1836, films:['Mamma Mia! Here We Go Again']},
-    {name:'Zátoka Stiniva (Vis)', lat:43.0169, lon:16.1553, films:['Mamma Mia! Here We Go Again','Porco Rosso (předloha)']},
-    {name:'Národní park Plitvická jezera', lat:44.8654, lon:15.5820, films:['Vinnetou']},
-    {name:'Vodopády Krka (Skradinski buk)', lat:43.8074, lon:15.9714, films:['Vinnetou']},
-    {name:'Kaňon Zrmanja (Obrovac)', lat:44.2044, lon:15.6825, films:['Vinnetou']},
-    {name:'Národní park Paklenica', lat:44.3339, lon:15.4611, films:['Vinnetou']},
-    {name:'Rovinj', lat:45.0811, lon:13.6387, films:['Hitman\u2019s Wife\u2019s Bodyguard']}
+    // Chorvatsko — Game of Thrones a Star Wars
+    {country:'hr',name:'Pevnost Lovrijenac (Dubrovník)',lat:42.6404,lon:18.1052,films:['Game of Thrones — Rudá bašta / King\u2019s Landing'],src:'hrGot'},
+    {country:'hr',name:'Hradby a Staré Město Dubrovník',lat:42.6414,lon:18.1074,films:['Game of Thrones — King\u2019s Landing','Star Wars: Poslední z Jediů — Canto Bight','Robin Hood (2018)'],src:'hrGot'},
+    {country:'hr',name:'Věž Minčeta (Dubrovník)',lat:42.6421,lon:18.1085,films:['Game of Thrones — Dům nesmrtelných'],src:'hrGot'},
+    {country:'hr',name:'Jezuitské schody (Dubrovník)',lat:42.6398,lon:18.1101,films:['Game of Thrones — Cersein pochod hanby'],src:'hrGot'},
+    {country:'hr',name:'Park Gradac (Dubrovník)',lat:42.6389,lon:18.1030,films:['Game of Thrones — Purpurová svatba'],src:'hrGot'},
+    {country:'hr',name:'Knížecí palác (Dubrovník)',lat:42.6403,lon:18.1109,films:['Game of Thrones — Qarth','Star Wars: Poslední z Jediů — Canto Bight'],src:'hrSw'},
+    {country:'hr',name:'Ostrov Lokrum',lat:42.6247,lon:18.1181,films:['Game of Thrones — Qarth'],src:'hrGot'},
+    {country:'hr',name:'Arboretum Trsteno',lat:42.7167,lon:17.9640,films:['Game of Thrones — zahrady Rudé bašty'],src:'hrGot'},
+    {country:'hr',name:'Diokleciánův palác — sklepy (Split)',lat:43.50812,lon:16.44019,films:['Game of Thrones — trůnní sál a podzemí Meereenu'],src:'hrSplit'},
+    {country:'hr',name:'Pevnost Klis',lat:43.5563,lon:16.5225,films:['Game of Thrones — Meereen'],src:'hrSplit'},
+    {country:'hr',name:'Žrnovnica (u Splitu)',lat:43.5230,lon:16.5490,films:['Game of Thrones — okolí Meereenu'],src:'hrSplit'},
+    {country:'hr',name:'Kaštel Gomilica',lat:43.5490,lon:16.3895,films:['Game of Thrones — Braavos'],src:'hrSplit'},
+    {country:'hr',name:'Katedrála sv. Jakuba (Šibenik)',lat:43.7360,lon:15.8895,films:['Game of Thrones — Železná banka Braavosu'],src:'hrSibenik'},
+    {country:'hr',name:'Klášter sv. Dominika (Trogir)',lat:43.5163,lon:16.2513,films:['Game of Thrones — interiéry Qarthu'],src:'hrSplit'},
+    {country:'hr',name:'Pile Gate (Dubrovník)',lat:42.6417295,lon:18.1068385,films:['Game of Thrones — vstup do King\u2019s Landing'],src:'hrGot'},
+    {country:'hr',name:'Pevnost Bokar (Dubrovník)',lat:42.64092,lon:18.10613,films:['Game of Thrones — hradby King\u2019s Landing'],src:'hrGot'},
+    {country:'hr',name:'Západní přístav Kolorina (Dubrovník)',lat:42.6405763,lon:18.1034994,films:['Game of Thrones — Blackwater Bay'],src:'hrGot'},
+    {country:'hr',name:'Hotel Belvedere (Dubrovník)',lat:42.6332717,lon:18.1314892,films:['Game of Thrones — souboj Oberyna a Hory'],src:'hrGot'},
+    {country:'hr',name:'Peristyl Diokleciánova paláce (Split)',lat:43.5082394,lon:16.4401693,films:['Game of Thrones — ulice Meereenu'],src:'hrSplit'},
+    {country:'hr',name:'Pevnost sv. Mikuláše (Šibenik)',lat:43.7201741,lon:15.8550459,films:['Game of Thrones — Braavos'],src:'hrSibenik'},
+    {country:'hr',name:'Stradun (Dubrovník)',lat:42.64124,lon:18.10812,films:['Star Wars: Poslední z Jediů — Canto Bight'],src:'hrSw'},
+    {country:'hr',name:'Dominikánský klášter (Dubrovník)',lat:42.64205,lon:18.11148,films:['Star Wars: Poslední z Jediů — Canto Bight'],src:'hrSw'},
+    {country:'hr',name:'Ulice Pustijerna (Dubrovník)',lat:42.63961,lon:18.11137,films:['Star Wars: Poslední z Jediů — Canto Bight'],src:'hrSw'},
+
+    // Původní další chorvatská filmová místa
+    {country:'hr',name:'Komiža (ostrov Vis)',lat:43.0456,lon:16.0894,films:['Mamma Mia! Here We Go Again']},
+    {country:'hr',name:'Město Vis',lat:43.0619,lon:16.1836,films:['Mamma Mia! Here We Go Again']},
+    {country:'hr',name:'Zátoka Stiniva (Vis)',lat:43.0169,lon:16.1553,films:['Mamma Mia! Here We Go Again','Porco Rosso (předloha)']},
+    {country:'hr',name:'Národní park Plitvická jezera',lat:44.8654,lon:15.5820,films:['Vinnetou']},
+    {country:'hr',name:'Vodopády Krka (Skradinski buk)',lat:43.8074,lon:15.9714,films:['Vinnetou']},
+    {country:'hr',name:'Kaňon Zrmanja (Obrovac)',lat:44.2044,lon:15.6825,films:['Vinnetou']},
+    {country:'hr',name:'Národní park Paklenica',lat:44.3339,lon:15.4611,films:['Vinnetou']},
+    {country:'hr',name:'Rovinj',lat:45.0811,lon:13.6387,films:['Hitman\u2019s Wife\u2019s Bodyguard']},
+
+    // Španělsko — Game of Thrones
+    {country:'es',name:'Královský Alcázar v Seville',lat:37.3832105,lon:-5.9901835,films:['Game of Thrones — Vodní zahrady Dorne'],src:'es'},
+    {country:'es',name:'Býčí aréna v Osuně',lat:37.2420669,lon:-5.108736,films:['Game of Thrones — bojová aréna Meereenu'],src:'es'},
+    {country:'es',name:'Římský most v Córdobě',lat:37.8766472,lon:-4.7779624,films:['Game of Thrones — Dlouhý most ve Volantisu'],src:'es'},
+    {country:'es',name:'Hrad Almodóvar del Río',lat:37.8074159,lon:-5.0238338,films:['Game of Thrones — Highgarden'],src:'es'},
+    {country:'es',name:'Amfiteátr Itálica',lat:37.443834,lon:-6.0473921,films:['Game of Thrones — Dračí jáma'],src:'es'},
+    {country:'es',name:'Královské loděnice v Seville',lat:37.384705,lon:-5.995454,films:['Game of Thrones — podzemí Rudé bašty'],src:'es'},
+    {country:'es',name:'Hrad Zafra',lat:40.835121,lon:-1.7062941,films:['Game of Thrones — Věž radosti'],src:'es'},
+    {country:'es',name:'Bardenas Reales',lat:42.1611684,lon:-1.4662507,films:['Game of Thrones — Dothracké moře'],src:'es'},
+    {country:'es',name:'Hrad Peñíscola',lat:40.358869,lon:0.4076244,films:['Game of Thrones — Meereen'],src:'es'},
+    {country:'es',name:'Katedrála v Gironě',lat:41.9875086,lon:2.8262735,films:['Game of Thrones — Velké septum v Baelorově městě'],src:'es'},
+    {country:'es',name:'Arabské lázně v Gironě',lat:41.9880582,lon:2.8257024,films:['Game of Thrones — Braavos'],src:'es'},
+    {country:'es',name:'Klášter Sant Pere de Galligants',lat:41.9887347,lon:2.8266059,films:['Game of Thrones — citadela v Oldtownu'],src:'es'},
+    {country:'es',name:'San Juan de Gaztelugatxe',lat:43.4406476,lon:-2.7788766,films:['Game of Thrones — Dračí kámen'],src:'es'},
+    {country:'es',name:'Pláž Itzurun',lat:43.3001579,lon:-2.2606752,films:['Game of Thrones — pobřeží Dračího kamene'],src:'es'},
+    {country:'es',name:'Pláž Muriola',lat:43.413213,lon:-2.9599374,films:['Game of Thrones — pobřeží Dračího kamene'],src:'es'},
+    {country:'es',name:'Staré město Cáceres',lat:39.4734664,lon:-6.3701964,films:['Game of Thrones — King\u2019s Landing'],src:'es'},
+    {country:'es',name:'Los Barruecos',lat:39.4252534,lon:-6.4943748,films:['Game of Thrones — bitva Kořistní vlak'],src:'es'},
+    {country:'es',name:'Hrad Trujillo',lat:39.462414,lon:-5.8822512,films:['Game of Thrones — Casterly Rock'],src:'es'},
+    {country:'es',name:'Hrad Santa Florentina',lat:41.6007624,lon:2.5769588,films:['Game of Thrones — Horn Hill'],src:'es'},
+    {country:'es',name:'Alcazaba v Almeríi',lat:36.8409143,lon:-2.4713452,films:['Game of Thrones — Dorne'],src:'es'},
+    {country:'es',name:'El Chorrillo',lat:36.947341,lon:-2.4089777,films:['Game of Thrones — Vaes Dothrak'],src:'es'},
+
+    // Španělsko — Star Wars
+    {country:'es',name:'Plaza de España v Seville',lat:37.3769032,lon:-5.9856502,films:['Star Wars: Epizoda II — palác Theed na Naboo'],src:'es'},
+    {country:'es',name:'Údolí Pecenescal (Fuerteventura)',lat:28.1204,lon:-14.276561,films:['Solo: Star Wars Story — planeta Savareen'],src:'esSolo'},
+
+    // Island — Game of Thrones a Star Wars
+    {country:'is',name:'Národní park Þingvellir',lat:64.2786082,lon:-21.0819412,films:['Game of Thrones — Údolí Arryn a Krvavá brána'],src:'is'},
+    {country:'is',name:'Vodopád Þórufoss',lat:64.2608416,lon:-21.369973,films:['Game of Thrones — Drogon ve Východozemí'],src:'is'},
+    {country:'is',name:'Jeskyně Grjótagjá',lat:65.6256617,lon:-16.8833938,films:['Game of Thrones — jeskyně Jona a Ygritte'],src:'is'},
+    {country:'is',name:'Dimmuborgir',lat:65.5880548,lon:-16.9079361,films:['Game of Thrones — tábor Divokých'],src:'is'},
+    {country:'is',name:'Höfði u jezera Mývatn',lat:65.587745,lon:-16.947768,films:['Game of Thrones — krajina za Zdí'],src:'is'},
+    {country:'is',name:'Hora Kirkjufell',lat:64.9399465,lon:-23.3074783,films:['Game of Thrones — Hora ve tvaru šípu'],src:'is'},
+    {country:'is',name:'Ledovec Svínafellsjökull',lat:64.0227007,lon:-16.8026575,films:['Game of Thrones — krajina za Zdí'],src:'is'},
+    {country:'is',name:'Kaňon Stakkholtsgjá',lat:63.6708879,lon:-19.5402452,films:['Game of Thrones — výprava za Zeď'],src:'is'},
+    {country:'is',name:'Pláž Reynisfjara',lat:63.4044262,lon:-19.0587987,films:['Rogue One: Star Wars Story — planeta Eadu'],src:'is'},
+    {country:'is',name:'Kráter Víti u Krafly',lat:65.71711,lon:-16.75380,films:['Star Wars: Síla se probouzí — základna Starkiller'],src:'is'},
+    {country:'is',name:'Jezero Mývatn',lat:65.6039,lon:-17.0000,films:['Star Wars: Síla se probouzí — základna Starkiller'],src:'is'},
+    {country:'is',name:'Ledovec Eyjafjallajökull',lat:63.6314,lon:-19.6083,films:['Star Wars: Síla se probouzí — ledový svět Ilum'],src:'is'},
+    {country:'is',name:'Hjörleifshöfði',lat:63.4151342,lon:-18.7434359,films:['Rogue One: Star Wars Story — islandské exteriéry'],src:'is'},
+    {country:'is',name:'Hafursey',lat:63.5253484,lon:-18.7852181,films:['Rogue One: Star Wars Story — islandské exteriéry'],src:'is'},
+    {country:'is',name:'Jeskyně Gígjagjá',lat:63.4169143,lon:-18.7632538,films:['Rogue One: Star Wars Story — islandské exteriéry'],src:'is'},
+
+    // Malta — první řada Game of Thrones
+    {country:'mt',name:'Brána Mdina',lat:35.8848112,lon:14.4035173,films:['Game of Thrones — brána King\u2019s Landing'],src:'mt'},
+    {country:'mt',name:'Náměstí Mesquita v Mdině',lat:35.8858022,lon:14.402546,films:['Game of Thrones — Littlefingerův nevěstinec'],src:'mt'},
+    {country:'mt',name:'Klášter sv. Dominika v Rabatu',lat:35.876389,lon:14.399472,films:['Game of Thrones — zahrada Rudé bašty'],src:'mt'},
+    {country:'mt',name:'Pevnost Manoel',lat:35.9028825,lon:14.5049228,films:['Game of Thrones — Velké septum v Baelorově městě'],src:'mt'},
+    {country:'mt',name:'Pevnost Ricasoli',lat:35.8969046,lon:14.5274709,films:['Game of Thrones — brána Rudé bašty'],src:'mt'},
+    {country:'mt',name:'Palác a zahrady San Anton',lat:35.8964328,lon:14.4463251,films:['Game of Thrones — Rudá bašta'],src:'mt'},
+    {country:'mt',name:'Palác Verdala',lat:35.8614983,lon:14.4006352,films:['Game of Thrones — sídlo Illyria Mopatia'],src:'mt'},
+    {country:'mt',name:'Pevnost St Angelo',lat:35.8918134,lon:14.5184233,films:['Game of Thrones — podzemí Rudé bašty'],src:'mt'},
+    {country:'mt',name:'Útesy Mtaħleb',lat:35.876944,lon:14.352222,films:['Game of Thrones — Dothracké moře a pohřební hranice'],src:'mt'},
+    {country:'mt',name:'Dwejra — místo Azure Window',lat:36.0524598,lon:14.1905333,films:['Game of Thrones — svatba Daenerys a Droga'],src:'mt'},
+    {country:'mt',name:'Manikata',lat:35.9407206,lon:14.3537646,films:['Game of Thrones — vesnice Lhazarénů'],src:'mt'},
+
+    // Spojené království — Severní Irsko / Game of Thrones
+    {country:'gb',name:'Castle Ward',lat:54.3729688,lon:-5.5787747,films:['Game of Thrones — Zimohrad'],src:'gbGot'},
+    {country:'gb',name:'Audley\u2019s Castle',lat:54.37957,lon:-5.57193,films:['Game of Thrones — Robbův tábor a bojiště'],src:'gbGot'},
+    {country:'gb',name:'Inch Abbey',lat:54.336262,lon:-5.7295759,films:['Game of Thrones — Robb prohlášen králem Severu'],src:'gbGot'},
+    {country:'gb',name:'Tollymore Forest Park',lat:54.2188815,lon:-5.9489858,films:['Game of Thrones — les severně od Zdi'],src:'gbGot'},
+    {country:'gb',name:'Dark Hedges',lat:55.1346988,lon:-6.3815825,films:['Game of Thrones — Královská cesta'],src:'gbGot'},
+    {country:'gb',name:'Ballintoy Harbour',lat:55.2436732,lon:-6.3693296,films:['Game of Thrones — Železné ostrovy'],src:'gbGot'},
+    {country:'gb',name:'Larrybane Quarry',lat:55.2411536,lon:-6.3514356,films:['Game of Thrones — Renlyho tábor'],src:'gbGot'},
+    {country:'gb',name:'Cushendun Caves',lat:55.124288,lon:-6.0372229,films:['Game of Thrones — Melisandřina jeskyně'],src:'gbGot'},
+    {country:'gb',name:'Murlough Bay',lat:55.2108995,lon:-6.1116991,films:['Game of Thrones — pobřeží Železných ostrovů'],src:'gbGot'},
+    {country:'gb',name:'Fair Head',lat:55.2240926,lon:-6.1403021,films:['Game of Thrones — útesy Dračího kamene'],src:'gbGot'},
+    {country:'gb',name:'Downhill Beach',lat:55.1807856,lon:-6.9292781,films:['Game of Thrones — pobřeží Dračího kamene'],src:'gbGot'},
+    {country:'gb',name:'Portstewart Strand',lat:55.1695673,lon:-6.7453995,films:['Game of Thrones — pobřeží Dorne'],src:'gbGot'},
+    {country:'gb',name:'Binevenagh',lat:55.1142056,lon:-6.9163828,films:['Game of Thrones — Dothracké moře'],src:'gbGot'},
+    {country:'gb',name:'Pollnagollum Cave',lat:54.3366891,lon:-7.8128869,films:['Game of Thrones — úkryt Bratrstva bez praporců'],src:'gbGot'},
+    {country:'gb',name:'Carnlough Harbour',lat:54.9927,lon:-5.9920,films:['Game of Thrones — kanál v Braavosu'],src:'gbGot'},
+    {country:'gb',name:'Magheramorne Quarry',lat:54.81093,lon:-5.76517,films:['Game of Thrones — Černý hrad a Tvrdodomov'],src:'gbGot'},
+    {country:'gb',name:'Gosford Castle',lat:54.3109008,lon:-6.5193109,films:['Game of Thrones — Řekotočí'],src:'gbGot'},
+    {country:'gb',name:'Game of Thrones Studio Tour',lat:54.3316063,lon:-6.2722291,films:['Game of Thrones — původní kostýmy a kulisy'],src:'gbGot'},
+
+    // Spojené království — Star Wars
+    {country:'gb',name:'Puzzlewood',lat:51.7773601,lon:-2.6136933,films:['Star Wars: Síla se probouzí — les na Takodaně'],src:'gbPuzzlewood'},
+    {country:'gb',name:'Greenham Common bunkry',lat:51.3779,lon:-1.3020,films:['Star Wars: Síla se probouzí — základna Odboje na D\u2019Qar'],src:'gbGreenham'},
+    {country:'gb',name:'Canary Wharf Underground Station',lat:51.50361,lon:-0.01861,films:['Rogue One: Star Wars Story — imperiální základna na Scarifu']},
+    {country:'gb',name:'Black Park',lat:51.5427879,lon:-0.5441517,films:['Star Wars: Vzestup Skywalkera — lesní exteriéry']},
+
+    // Irsko — Star Wars
+    {country:'ie',name:'Skellig Michael',lat:51.7712752,lon:-10.540596,films:['Star Wars: Síla se probouzí a Poslední z Jediů — Ahch-To'],src:'ie'},
+    {country:'ie',name:'Ceann Sibéal',lat:52.1655,lon:-10.4660,films:['Star Wars: Poslední z Jediů — vesnice na Ahch-To'],src:'ie'},
+    {country:'ie',name:'Malin Head',lat:55.3747865,lon:-7.3998451,films:['Star Wars: Poslední z Jediů — Ahch-To'],src:'ie'},
+    {country:'ie',name:'Brow Head',lat:51.454395,lon:-9.7593913,films:['Star Wars: Poslední z Jediů — Ahch-To'],src:'ie'},
+    {country:'ie',name:'Loop Head',lat:52.5595239,lon:-9.9381113,films:['Star Wars: Poslední z Jediů — irské pobřežní exteriéry'],src:'ie'},
+
+    // Itálie, Norsko a Švýcarsko — Star Wars
+    {country:'it',name:'Villa del Balbianello',lat:45.9650877,lon:9.2025018,films:['Star Wars: Epizoda II — jezerní sídlo na Naboo'],src:'it'},
+    {country:'it',name:'Královský palác Caserta',lat:41.0731576,lon:14.3271038,films:['Star Wars: Epizoda I a II — palác Theed na Naboo']},
+    {country:'it',name:'Etna',lat:37.7476765,lon:14.9661442,films:['Star Wars: Epizoda III — sopečné záběry planety Mustafar']},
+    {country:'it',name:'Tre Cime di Lavaredo',lat:46.6191,lon:12.3030,films:['Solo: Star Wars Story — zasněžená planeta Vandor-1'],src:'itSolo'},
+    {country:'it',name:'Monte Piana',lat:46.6250,lon:12.2367,films:['Solo: Star Wars Story — zasněžená planeta Vandor-1'],src:'itSolo'},
+    {country:'it',name:'Lago di Misurina',lat:46.582778,lon:12.254444,films:['Solo: Star Wars Story — zasněžená planeta Vandor-1'],src:'itSolo'},
+    {country:'it',name:'Lago d\u2019Antorno',lat:46.5976,lon:12.2677,films:['Solo: Star Wars Story — zasněžená planeta Vandor-1'],src:'itSolo'},
+    {country:'it',name:'Dolomiti di Fassa',lat:46.4550,lon:11.7080,films:['Solo: Star Wars Story — zasněžená planeta Vandor-1'],src:'itSolo'},
+    {country:'no',name:'Finse',lat:60.60301,lon:7.5020162,films:['Star Wars: Epizoda V — základna Echo na Hothu'],src:'no'},
+    {country:'no',name:'Ledovec Hardangerjøkulen',lat:60.5362444,lon:7.4043088,films:['Star Wars: Epizoda V — exteriéry planety Hoth'],src:'no'},
+    {country:'ch',name:'Bachalpsee',lat:46.6695806,lon:8.0209533,films:['Star Wars: Epizoda III — krajinná předloha planety Alderaan'],src:'ch'}
   ];
 
   /* =========================================================================
@@ -1819,8 +1954,11 @@
   const BYTES_PER_CAMP = 480;                                   // empirický průměr velikosti JSON prvku
 
   // START APLIKACE: použij uloženou cache. Stahuj JEN když žádná cache není (první spuštění na tomto počítači).
-  // Ulož data do správné záložky
-  function setTabData(tab, data){ DATA[tab] = data; }
+  // Ulož data do správné záložky. Ručně ověřená filmová místa se přidávají
+  // až tady, takže nejsou součástí automaticky přepisovaných týdenních JSONů.
+  function setTabData(tab, data){
+    DATA[tab] = tab === 'sights' ? injectFilmSites(data, activeCountry) : data;
+  }
   // Vrať data dané záložky
   function getTabData(tab){ return DATA[tab] || []; }
 
@@ -2110,7 +2248,7 @@
       ZONES = parsed.data;
       zonesAvailable = true;
     }else{
-      DATA[id] = parsed.data;
+      setTabData(id, parsed.data);
       tabFetchedAt[id] = parsed.fetchedAt;
     }
     return true;
@@ -2130,7 +2268,7 @@
       return;
     }
     for(const id in TABS){
-      if(bakedData[id] && bakedData[id].data){ DATA[id] = bakedData[id].data; tabFetchedAt[id] = bakedData[id].fetchedAt; }
+      if(bakedData[id] && bakedData[id].data){ setTabData(id, bakedData[id].data); tabFetchedAt[id] = bakedData[id].fetchedAt; }
     }
     zonesAvailable = !!(bakedData.zones && Array.isArray(bakedData.zones.data));
     ZONES = zonesAvailable ? bakedData.zones.data : [];
@@ -2384,7 +2522,6 @@
         // pozn.: celý balík OSM tagů zde ZÁMĚRNĚ neukládáme — kvůli velikosti cache
       });
     }
-    if(tab==='sights' && activeCountry==='hr') mergeFilms(out); // curated filmové lokace jsou zatím jen pro Chorvatsko
     return out;                                                 // vrať hotové
   }
 
@@ -2403,28 +2540,39 @@
     return false;                                                                     // jinak = spíš drobnost
   }
 
-  // Napáruje curated filmová místa na nejbližší turistický bod (do 180 m);
-  // když poblíž žádný není, přidá filmové místo jako samostatný bod.
-  function mergeFilms(list){
-    for(const f of FILM_SITES){                                 // pro každou filmovou lokaci
-      let best=null, bestD=Infinity;                            // hledej nejbližší bod
-      for(const s of list){
-        const d = haversine(f.lat,f.lon,s.lat,s.lon);           // vzdálenost
-        if(d<bestD){ bestD=d; best=s; }                         // zapamatuj nejbližší
-      }
-      if(best && bestD<=180){                                   // je blízko existující bod?
-        best.film=true;                                         // označ ho jako filmový
-        best.notable=true;                                      // filmové místo je vždy „významné"
-        best.films=(best.films||[]).concat(f.films);            // přidej seznam produkcí
-      }else{                                                    // jinak přidej vlastní bod
-        list.push({
-          id:'film/'+f.name, lat:f.lat, lon:f.lon, name:f.name, // syntetický bod
-          cat:'attraction', notable:true, website:null, wikipedia:null, wikidata:null,
-          addr:null, city:null, region:regionOf(f.lat,f.lon),
-          film:true, films:f.films.slice(), tags:{}
-        });
+  function hasFilmSites(country=activeCountry){
+    return FILM_SITES.some(site=>site.country===country);
+  }
+
+  // Staré verze ukládaly filmový příznak do nejbližšího OSM bodu. Při načtení
+  // ho nejprve odstraníme a filmová místa vložíme samostatně na přesnou polohu.
+  // Funkce je idempotentní, takže funguje i s dříve uloženou cache.
+  function injectFilmSites(data, country){
+    const list=[];
+    for(const site of (Array.isArray(data) ? data : [])){
+      if(String(site.id||'').startsWith('film/')) continue;
+      if(site.film || site.films || site.filmSource){
+        const clean={...site};
+        delete clean.film;
+        delete clean.films;
+        delete clean.filmSource;
+        list.push(clean);
+      }else{
+        list.push(site);
       }
     }
+    for(const f of FILM_SITES){
+      if(f.country!==country) continue;
+      list.push({
+        id:'film/'+f.name, lat:f.lat, lon:f.lon, name:f.name,
+        cat:'attraction', notable:true, website:null, wikipedia:null, wikidata:null,
+        addr:null, city:null, region:regionOf(f.lat,f.lon),
+        film:true, films:f.films.slice(),
+        filmSource:f.src ? FILM_SOURCE_URLS[f.src] : null,
+        tags:{}
+      });
+    }
+    return list;
   }
 
   /* =========================================================================
@@ -3554,9 +3702,9 @@
     const cfg=poi ? activeCfg() : null;
     const f=cfg ? cfg.f : null;
     // Výběrové typy se sčítají: objekt stačí zařadit do kterékoli vybrané
-    // kategorie, mezi významná místa nebo (v Chorvatsku) mezi filmová místa.
+    // kategorie, mezi významná místa nebo mezi filmová místa.
     const activeCats=cfg ? cfg.cats.filter(category=>f[category.key]).map(category=>category.key) : [];
-    const filmFilter=poi&&activeCountry==='hr'&&!!f.film;
+    const filmFilter=poi&&hasFilmSites()&&!!f.film;
     const hasPoiTypeFilters=poi&&(activeCats.length>0||!!f.notable||filmFilter);
     const noPoiFilters=poi&&!q&&!region&&!hasPoiTypeFilters&&!f.web&&!f.visited&&!f.fav;
     const noCampFilters=!poi&&!q&&!region&&!minStars
@@ -3869,8 +4017,9 @@
     const wiki = site.wikipedia ? wikipediaUrl(site.wikipedia) : null; // odkaz na Wikipedii
 
     // Řádek s filmovými produkcemi (pokud je to filmové místo)
+    const filmSource = site.filmSource ? safeExternalUrl(site.filmSource) : null;
     const filmRow = site.film && site.films && site.films.length
-      ? `<div class="drow"><div class="k">🎬 Filmová místa</div><div class="v">${site.films.map(f=>`<div>${esc(f)}</div>`).join('')}</div></div>`
+      ? `<div class="drow"><div class="k">🎬 Filmová místa</div><div class="v">${site.films.map(f=>`<div>${esc(f)}</div>`).join('')}${filmSource ? `<div style="margin-top:5px"><a href="${esc(filmSource)}" target="_blank" rel="noopener">Zdroj ověření ↗</a></div>` : ''}</div></div>`
       : '';
 
     document.getElementById('dbody').innerHTML = `
@@ -4651,7 +4800,7 @@
     const box = document.getElementById('poiChips');          // kontejner chipů
     let html = '';                                            // sestavované HTML
     if((cfg.special||[]).includes('notable')) html += `<span class="pill${cfg.f.notable?' on':''}" data-sf="notable">⭐ Významná místa</span>`;
-    if(activeCountry==='hr' && (cfg.special||[]).includes('film')) html += `<span class="pill film${cfg.f.film?' on':''}" data-sf="film">🎬 Filmová místa</span>`;
+    if(hasFilmSites() && (cfg.special||[]).includes('film')) html += `<span class="pill film${cfg.f.film?' on':''}" data-sf="film">🎬 Filmová místa</span>`;
     cfg.cats.forEach(c=>{                                     // chip pro každou kategorii
       html += `<span class="pill${cfg.f[c.key]?' on':''}" data-sf="${c.key}">${esc(c.label)}</span>`;
     });
@@ -4673,7 +4822,7 @@
   // Vygeneruje legendu pro POI záložku z barev kategorií
   function buildPoiLegend(cfg){
     let html = '';                                            // sestavované HTML
-    if(activeCountry==='hr' && (cfg.special||[]).includes('film')) html += `<div class="lg"><span class="dot" style="background:#e11d48"></span> 🎬 Filmové místo</div>`;
+    if(hasFilmSites() && (cfg.special||[]).includes('film')) html += `<div class="lg"><span class="dot" style="background:#e11d48"></span> 🎬 Filmové místo</div>`;
     cfg.cats.forEach(c=>{                                     // řádek pro každou kategorii
       html += `<div class="lg"><span class="dot" style="background:${c.color}"></span> ${esc(c.label)}</div>`;
     });
