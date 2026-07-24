@@ -2560,6 +2560,27 @@
     let suppressClickUntil=0;
     let lastRightClick=null;
 
+    const applyTouchZoom=()=>{
+      if(!touchZoom) return;
+      touchZoom.frame=0;
+      const targetZoom=touchZoom.pendingZoom;
+      if(!Number.isFinite(targetZoom)||Math.abs(targetZoom-map.getZoom())<.001) return;
+      const viewHalf=map.getSize().divideBy(2);
+      const center=map.unproject(
+        map.project(touchZoom.anchorLatLng,targetZoom)
+          .subtract(touchZoom.anchor.subtract(viewHalf)),
+        targetZoom
+      );
+      if(!touchZoom.moveStarted){
+        map._moveStart(true,false);
+        touchZoom.moveStarted=true;
+      }
+      touchZoom.center=center;
+      // Během gesta jen plynule škáluj stávající dlaždice. Nová sada dlaždic
+      // se dopočítá až po puštění prstu na nejbližší čtvrtinové úrovni.
+      map._move(center,targetZoom,{pinch:true,round:false});
+    };
+
     container.addEventListener('pointerdown',event=>{
       // Primární levé tlačítko odpovídá prstu, peru i levému tlačítku myši.
       // Není tak závislé na tom, jak konkrétní mobilní prohlížeč označí pointerType.
@@ -2572,9 +2593,13 @@
         event.stopImmediatePropagation();
         const dragWasEnabled=!!(map.dragging&&map.dragging.enabled());
         if(dragWasEnabled) map.dragging.disable();
+        const anchor=map.mouseEventToContainerPoint(event);
+        map._stop();
         touchZoom={
           pointerId:event.pointerId,startY:event.clientY,startZoom:map.getZoom(),
-          anchor:map.mouseEventToContainerPoint(event),moved:false,dragWasEnabled
+          anchor,anchorLatLng:map.containerPointToLatLng(anchor),
+          moved:false,dragWasEnabled,pendingZoom:map.getZoom(),frame:0,
+          moveStarted:false,center:null
         };
         lastTap=null;
         tapCandidate=null;
@@ -2594,8 +2619,8 @@
         if(Math.abs(dy)>6) touchZoom.moved=true;
         if(touchZoom.moved){
           // Google Maps: dolů = přiblížit, nahoru = oddálit.
-          const targetZoom=clampZoom(Math.round((touchZoom.startZoom+dy/85)*4)/4);
-          if(Math.abs(targetZoom-map.getZoom())>=.12) map.setZoomAround(touchZoom.anchor,targetZoom);
+          touchZoom.pendingZoom=clampZoom(touchZoom.startZoom+dy/100);
+          if(!touchZoom.frame) touchZoom.frame=requestAnimationFrame(applyTouchZoom);
         }
         return;
       }
@@ -2609,8 +2634,21 @@
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
+        if(touchZoom.frame){
+          cancelAnimationFrame(touchZoom.frame);
+          touchZoom.frame=0;
+          applyTouchZoom();
+        }
         if(!touchZoom.moved){
           map.setZoomAround(touchZoom.anchor,clampZoom(touchZoom.startZoom+1));
+        }else if(touchZoom.moveStarted){
+          const targetZoom=map._limitZoom(clampZoom(touchZoom.pendingZoom));
+          const center=touchZoom.center||map.getCenter();
+          if(map.options.zoomAnimation){
+            map._animateZoom(center,targetZoom,true,map.options.zoomSnap);
+          }else{
+            map._resetView(center,targetZoom);
+          }
         }
         try{ container.releasePointerCapture(event.pointerId); }catch(e){}
         if(touchZoom.dragWasEnabled) map.dragging.enable();
@@ -2630,6 +2668,15 @@
     container.addEventListener('pointerup',finishTouch,{capture:true,passive:false});
     container.addEventListener('pointercancel',event=>{
       if(touchZoom&&event.pointerId===touchZoom.pointerId){
+        if(touchZoom.frame){
+          cancelAnimationFrame(touchZoom.frame);
+          touchZoom.frame=0;
+          applyTouchZoom();
+        }
+        if(touchZoom.moveStarted){
+          const targetZoom=map._limitZoom(clampZoom(touchZoom.pendingZoom));
+          map._resetView(touchZoom.center||map.getCenter(),targetZoom);
+        }
         if(touchZoom.dragWasEnabled) map.dragging.enable();
         touchZoom=null;
       }
@@ -4200,24 +4247,27 @@
   }
 
   // Safari na iPadu může při uspání aplikace zahodit obrázky mapy schované pod
-  // pravým panelem. Samotný posun pak dlaždice znovu nenačte, protože Leaflet je
-  // stále považuje za hotové. Po dokončení animace proto obnovíme rozměr, body
-  // i aktivní podkladovou vrstvu.
-  function refreshMapAfterDetailChange(reloadTiles){
+  // pravým panelem. Zdravé dlaždice ale nesmíme bezdůvodně překreslit — způsobilo
+  // by to probliknutí mapy a při dočasné chybě serveru i chybový obrázek.
+  function refreshMapAfterDetailChange(repairTiles){
     if(!map) return;
-    const refresh=redraw=>{
+    const refresh=checkTiles=>{
       if(!map) return;
       map.invalidateSize({pan:false,animate:false});
-      if(redraw){
-        map.eachLayer(layer=>{
-          if(layer instanceof L.TileLayer && typeof layer.redraw==='function') layer.redraw();
-        });
+      if(checkTiles){
+        const tiles=[...map.getContainer().querySelectorAll('.leaflet-tile')];
+        const needsRepair=!tiles.length||tiles.some(tile=>tile.complete&&tile.naturalWidth===0);
+        if(needsRepair){
+          map.eachLayer(layer=>{
+            if(layer instanceof L.TileLayer && typeof layer.redraw==='function') layer.redraw();
+          });
+        }
       }
       scheduleVisibleRender();
     };
     requestAnimationFrame(()=>refresh(false));
     clearTimeout(detailMapRefreshTimer);
-    detailMapRefreshTimer=setTimeout(()=>refresh(!!reloadTiles),260);
+    detailMapRefreshTimer=setTimeout(()=>refresh(!!repairTiles),260);
   }
 
   // Zavře detailní panel
@@ -4227,7 +4277,7 @@
     detail.classList.remove('open');                            // odeber třídu = panel zajede
     setActiveSite(null,false);                                  // zruš zvýraznění bodu i řádku
     scheduleViewSave();                                         // uživatel detail skutečně zavřel
-    if(wasOpen) refreshMapAfterDetailChange(true);               // doplň dlaždice dříve zakryté panelem
+    if(wasOpen) refreshMapAfterDetailChange(true);               // oprav jen skutečně chybějící dlaždice
   }
 
   /* =========================================================================
