@@ -95,10 +95,15 @@
       padding:7px 30px 7px 10px;border-radius:9px;font-size:12.5px;cursor:pointer;
     }
     #country:focus{outline:none;border-color:var(--sea)}
-    #topActions{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+    #topActions,#primaryActions{display:flex;align-items:center;gap:6px;flex:0 0 auto}
     #backupControls,#markCleanup{display:flex;align-items:center;gap:6px;flex:0 0 auto}
     #reloadPage{white-space:nowrap;border-color:rgba(96,165,250,.65);color:#bfdbfe}
     #reloadPage:hover{background:rgba(96,165,250,.14);border-color:#60a5fa;color:#eff6ff}
+    #helpButton{
+      width:34px;justify-content:center;padding:7px;border-color:rgba(245,184,65,.72);
+      color:#fde68a;font-weight:700;font-size:15px
+    }
+    #helpButton:hover{background:rgba(245,184,65,.14);border-color:var(--sand);color:#fff7d6}
     .reload-mobile{display:none}
     #backupControls .btn{padding:6px 9px;font-size:11.5px;white-space:nowrap;border-color:rgba(45,212,191,.55);color:#99f6e4}
     #backupControls .btn:hover{background:rgba(45,212,191,.12);border-color:var(--sea);color:#ccfbf1}
@@ -434,6 +439,59 @@
     #overlay .msg{font-size:13.5px;color:var(--ink);max-width:420px;line-height:1.5} /* text hlášení */
     #overlay .sub{font-size:11.5px;color:var(--muted)}          /* podřádek */
 
+    /* ===== Nápověda pro běžného uživatele ===== */
+    #helpDialog{
+      position:fixed;inset:0;z-index:2200;display:flex;align-items:center;justify-content:center;
+      padding:18px;background:rgba(3,10,14,.78);backdrop-filter:blur(5px)
+    }
+    #helpCard{
+      width:min(820px,100%);max-height:min(860px,calc(100dvh - 36px));
+      display:flex;flex-direction:column;overflow:hidden;
+      background:var(--panel);border:1px solid var(--line);border-radius:16px;
+      box-shadow:0 22px 70px rgba(0,0,0,.62)
+    }
+    #helpHead{
+      flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:15px 18px;
+      border-bottom:1px solid var(--line);background:var(--panel-2)
+    }
+    #helpHeadText{flex:1 1 auto;min-width:0}
+    #helpTitle{font-size:18px;line-height:1.2}
+    #helpHead p{margin-top:3px;color:var(--muted);font-size:11.5px;line-height:1.35}
+    #helpClose{
+      width:36px;height:36px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+      border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);
+      font-size:24px;line-height:1;cursor:pointer
+    }
+    #helpClose:hover{border-color:var(--sea);background:#162a32}
+    #helpBody{
+      min-height:0;overflow-y:auto;padding:18px;overscroll-behavior:contain;
+      -webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:var(--line) transparent
+    }
+    #helpBody::-webkit-scrollbar{width:7px}
+    #helpBody::-webkit-scrollbar-track{background:transparent}
+    #helpBody::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px}
+    .help-intro{
+      padding:12px 14px;margin-bottom:14px;border:1px solid rgba(45,212,191,.35);
+      border-radius:11px;background:rgba(45,212,191,.07);font-size:13px;line-height:1.55
+    }
+    .help-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .help-section{
+      padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg)
+    }
+    .help-section.wide{grid-column:1/-1}
+    .help-section h3{font-size:13.5px;line-height:1.3;margin-bottom:8px;color:#fff}
+    .help-section p,.help-section li{font-size:12px;line-height:1.55;color:#c9d7da}
+    .help-section ul,.help-section ol{padding-left:19px}
+    .help-section li+li{margin-top:5px}
+    .help-section strong{color:var(--ink)}
+    .help-section .hint{
+      display:block;margin-top:8px;padding:7px 9px;border-radius:8px;
+      background:var(--panel-2);color:var(--muted);font-size:11px;line-height:1.45
+    }
+    .help-install{border-color:rgba(245,184,65,.42)}
+    .help-install h3{color:#fde68a}
+    .help-section a{color:#7dd3fc;text-underline-offset:2px}
+
     /* Obal progres baru (šířka omezená, na mobilu 80 %) */
     #progWrap{width:min(440px,80vw);display:none;flex-direction:column;gap:7px} /* skrytý, dokud nestahujeme */
     #progWrap.show{display:flex}                                 /* zobrazení při stahování */
@@ -511,13 +569,23 @@
       #countryWrap{grid-column:2;min-width:0;font-size:0}
       #country{width:100%;min-width:0}
       #topActions{display:contents}
-      #reloadPage{grid-column:3;justify-content:center;padding:6px 8px;font-size:11px}
+      #primaryActions{grid-column:3;display:flex;gap:5px}
+      #reloadPage{justify-content:center;padding:6px 8px;font-size:11px}
+      #topActions #helpButton{width:32px;justify-content:center;padding:6px;font-size:14px}
       .reload-full{display:none}
       .reload-mobile{display:inline}
       #backupControls,#markCleanup{
         grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;
       }
       #topActions .btn{justify-content:center;padding:6px 5px;font-size:11px;min-width:0}
+      #helpDialog{padding:0;align-items:stretch}
+      #helpCard{width:100%;height:100dvh;max-height:none;border:0;border-radius:0}
+      #helpHead{
+        padding:calc(12px + env(safe-area-inset-top)) 14px 12px;
+      }
+      #helpBody{padding:13px 13px calc(16px + env(safe-area-inset-bottom))}
+      .help-grid{grid-template-columns:1fr}
+      .help-section.wide{grid-column:auto}
     }
   </style>
 </head>
@@ -587,11 +655,15 @@
       <!-- Stavový text o datech (naplní JS) -->
       <div id="status">Načítám…</div>
       <div id="topActions">
-        <!-- Obnovení celé stránky; před načtením se uloží aktuální mapa, filtry a otevřený objekt -->
-        <button id="reloadPage" class="btn" type="button" title="Obnovit celou webovou stránku">
-          <span class="reload-full">↻ Obnovit stránku</span>
-          <span class="reload-mobile">↻ Obnovit</span>
-        </button>
+        <div id="primaryActions">
+          <!-- Obnovení celé stránky; před načtením se uloží aktuální mapa, filtry a otevřený objekt -->
+          <button id="reloadPage" class="btn" type="button" title="Obnovit celou webovou stránku">
+            <span class="reload-full">↻ Obnovit stránku</span>
+            <span class="reload-mobile">↻ Obnovit</span>
+          </button>
+          <!-- Stručný návod k aplikaci a přidání ikony na plochu telefonu -->
+          <button id="helpButton" class="btn" type="button" title="Otevřít nápovědu" aria-label="Nápověda" aria-haspopup="dialog" aria-controls="helpDialog" aria-expanded="false">?</button>
+        </div>
         <!-- Přenos osobních nastavení a uložených míst mezi prohlížeči -->
         <div id="backupControls">
           <button id="exportBackup" class="btn" type="button" title="Stáhnout nastavení a všechna uložená místa">⬇ Export</button>
@@ -733,6 +805,130 @@
           <button id="dclose" title="Zavřít">×</button>
         </div>
         <div id="dbody"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Nápověda je samostatný překryv, aby byla čitelná na počítači i přes celý displej telefonu -->
+  <div id="helpDialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle" hidden>
+    <div id="helpCard">
+      <div id="helpHead">
+        <div id="helpHeadText">
+          <h2 id="helpTitle">Jak používat cestovní mapu</h2>
+          <p>Rychlý návod k bodům, filtrům, poloze a uložení aplikace do telefonu</p>
+        </div>
+        <button id="helpClose" type="button" aria-label="Zavřít nápovědu" title="Zavřít">×</button>
+      </div>
+      <div id="helpBody">
+        <div class="help-intro">
+          Začni výběrem <strong>země</strong> nahoře a potom zvol záložku, například
+          <strong>Kempy</strong>, <strong>Turistická místa</strong> nebo <strong>Příroda</strong>.
+          Mapa používá předem připravená data z OpenStreetMap a sama zobrazuje jen body potřebné pro aktuální výřez.
+        </div>
+
+        <div class="help-grid">
+          <section class="help-section">
+            <h3>1. Body a barevná kolečka</h3>
+            <ul>
+              <li><strong>Číslo v kolečku</strong> znamená počet seskupených míst. Klepnutím mapu přiblížíš.</li>
+              <li>Na počítači se po najetí myší ukáže stručná bublina a kliknutím se otevře detail.</li>
+              <li>Na telefonu nejprve klepni na bod a potom v bublině na <strong>Detail</strong>.</li>
+              <li>Vybraný bod zůstane zvýrazněný, abys věděl, který detail je otevřený.</li>
+            </ul>
+          </section>
+
+          <section class="help-section">
+            <h3>2. Filtry a seznam míst</h3>
+            <ul>
+              <li>Levé menu otevřeš tlačítkem <strong>☰</strong>. Obsahuje filtry i seznam našich bodů.</li>
+              <li>Vybrané kategorie se sčítají. Když nevybereš žádnou kategorii, zobrazí se všechny.</li>
+              <li>Další volby umí omezit oblast, oblíbená či navštívená místa a objekty s informacemi.</li>
+              <li><strong>Reset filtrů</strong> vypne pouze filtry. Oblíbené ani navštívené body nesmaže.</li>
+            </ul>
+          </section>
+
+          <section class="help-section">
+            <h3>3. Vyhledávání</h3>
+            <ul>
+              <li>Psaní do pole průběžně filtruje naše body podle názvu, města a oblasti.</li>
+              <li>Klávesou Enter nebo tlačítkem <strong>⌕ Místo</strong> lze najít také město či adresu.</li>
+              <li>Při více shodách vyber správný výsledek. Modrá šipka zmizí po klepnutí jinam do mapy.</li>
+              <li>Do stejného pole lze vložit také přesné <strong>ID místa</strong> z jeho detailu.</li>
+            </ul>
+          </section>
+
+          <section class="help-section">
+            <h3>4. Detail a cesta na místo</h3>
+            <ul>
+              <li>V detailu najdeš souřadnice, dostupnou adresu, web, telefon, poznámky a případnou fotografii.</li>
+              <li>Klepnutí na název nebo <strong>Najít na Google Maps</strong> hledá podnik poblíž jeho souřadnic.</li>
+              <li><strong>Navigovat</strong> předá stejné místo navigaci v telefonu.</li>
+              <li>Údaje mohou být neúplné, proto si důležité informace před cestou ověř.</li>
+            </ul>
+          </section>
+
+          <section class="help-section">
+            <h3>5. Moje poloha</h3>
+            <ul>
+              <li>Tlačítko <strong>📍</strong> zapne nebo vypne průběžné zjišťování polohy.</li>
+              <li>Tlačítko <strong>🎯</strong> drží tvoji polohu uprostřed mapy. Ruční posunutí mapy sledování středu vypne.</li>
+              <li>Při dočasné ztrátě signálu zůstane vidět poslední známá poloha.</li>
+            </ul>
+            <span class="hint">Prohlížeč se při prvním použití zeptá, zda smí znát polohu. Bez povolení GPS funkce nepoběží.</span>
+          </section>
+
+          <section class="help-section">
+            <h3>6. Zóny a podklad mapy</h3>
+            <ul>
+              <li>V ovládání mapy lze přepnout běžnou mapu a satelitní fotografie.</li>
+              <li><strong>Zóny a omezení</strong> zobrazují dostupné nízkoemisní, omezené nebo placené oblasti a parkování.</li>
+              <li>Volbou <strong>Místa ze záložek</strong> můžeš všechny běžné body skrýt a prohlížet si samotné zóny.</li>
+            </ul>
+          </section>
+
+          <section class="help-section wide">
+            <h3>7. Oblíbená, navštívená a záloha</h3>
+            <p>
+              U jednotlivého místa lze označení <strong>Oblíbené</strong> a <strong>Navštívené</strong> kdykoli zapnout
+              i vypnout. Ukládají se pouze v tomto prohlížeči. Tlačítka <strong>Smazat oblíbené</strong> a
+              <strong>Smazat navštívené</strong> nahoře mažou označení ve všech zemích až po potvrzení.
+              Před změnou telefonu nebo prohlížeče použij <strong>Export</strong> a na novém zařízení <strong>Import</strong>.
+            </p>
+          </section>
+
+          <section class="help-section help-install">
+            <h3>Android: ikona na ploše</h3>
+            <ol>
+              <li>Otevři tento web v prohlížeči <strong>Chrome</strong>.</li>
+              <li>Klepni na nabídku <strong>⋮</strong> vpravo od adresního řádku.</li>
+              <li>Zvol <strong>Přidat na plochu</strong> a potom <strong>Instalovat</strong>.</li>
+              <li>Pokud se místo instalace nabídne <strong>Vytvořit zástupce</strong>, potvrď tuto možnost.</li>
+            </ol>
+            <span class="hint">Názvy položek se mohou mírně lišit podle verze telefonu a Chromu.</span>
+            <p><a href="https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DAndroid&amp;hl=cs" target="_blank" rel="noopener">Oficiální návod Google ↗</a></p>
+          </section>
+
+          <section class="help-section help-install">
+            <h3>iPhone nebo iPad: ikona na ploše</h3>
+            <ol>
+              <li>Otevři tento web v aplikaci <strong>Safari</strong>.</li>
+              <li>Klepni na <strong>Sdílet</strong> (čtverec se šipkou nahoru). V některých verzích nejprve otevři <strong>Více</strong>.</li>
+              <li>V seznamu zvol <strong>Přidat na plochu</strong>.</li>
+              <li>Je-li nabídnuto, zapni <strong>Otevřít jako webovou aplikaci</strong> a klepni na <strong>Přidat</strong>.</li>
+            </ol>
+            <span class="hint">Když volbu nevidíš, sjeď na konec nabídky, zvol Upravit akce a přidej „Přidat na plochu“.</span>
+            <p><a href="https://support.apple.com/cs-cz/guide/iphone/iphea86e5236/ios" target="_blank" rel="noopener">Oficiální návod Apple ↗</a></p>
+          </section>
+
+          <section class="help-section wide">
+            <h3>Co funguje bez internetu?</h3>
+            <p>
+              Seznam našich bodů se načítá z předem vytvořených JSON souborů na webu. Samotné mapové dlaždice,
+              satelitní snímky, fotografie, vyhledání města a odkazy na jiné služby ale potřebují připojení k internetu.
+              Tlačítko <strong>↻ Obnovit</strong> znovu načte stránku a zachová uložený pohled, filtry a otevřené místo.
+            </p>
+          </section>
+        </div>
       </div>
     </div>
   </div>
@@ -1048,6 +1244,7 @@
   let placeSearchPending = false; // právě se hledá město/adresa?
   let placeSearchResults = [];    // nabídnuté výsledky Nominatim
   let placeSearchMarker = null;   // dočasná značka města/adresy mimo naše objekty
+  let helpReturnFocus = null;      // prvek, na který se vrátí klávesnice po zavření nápovědy
   const markerById = {};        // rychlý přístup ke značce podle ID
   const listItemById = {};      // viditelný řádek levého seznamu podle ID
   let hoverPreviewMarker = null; // dočasný přesný bod, když je místo uvnitř shluku
@@ -4322,6 +4519,24 @@
     }
   }
 
+  function openHelp(){
+    const dialog=document.getElementById('helpDialog');
+    helpReturnFocus=document.activeElement;
+    document.getElementById('helpBody').scrollTop=0;
+    dialog.hidden=false;
+    document.getElementById('helpButton').setAttribute('aria-expanded','true');
+    requestAnimationFrame(()=>document.getElementById('helpClose').focus({preventScroll:true}));
+  }
+
+  function closeHelp(){
+    const dialog=document.getElementById('helpDialog');
+    if(dialog.hidden) return;
+    dialog.hidden=true;
+    document.getElementById('helpButton').setAttribute('aria-expanded','false');
+    if(helpReturnFocus&&helpReturnFocus.isConnected) helpReturnFocus.focus({preventScroll:true});
+    helpReturnFocus=null;
+  }
+
   /* =========================================================================
      DOKONČENÍ NAČTENÍ + STATUS
      ========================================================================= */
@@ -4399,6 +4614,11 @@
       saveCurrentView();
       window.location.reload();
     });
+    document.getElementById('helpButton').addEventListener('click',openHelp);
+    document.getElementById('helpClose').addEventListener('click',closeHelp);
+    document.getElementById('helpDialog').addEventListener('click',event=>{
+      if(event.target===event.currentTarget) closeHelp();        // kliknutí na tmavé okolí okna
+    });
 
     // Tlačítko aktualizace dat: ručně stáhni čerstvá data aktivní záložky
     document.getElementById('refresh').addEventListener('click', ()=> downloadFresh(true));
@@ -4426,9 +4646,11 @@
     // Klepnutí na ztmavené pozadí menu ho zavře
     document.getElementById('sbBackdrop').addEventListener('click', closeSidebar);
 
-    // Klávesa Esc zavře detail
+    // Klávesa Esc zavírá nejprve nápovědu, potom výsledky hledání a nakonec detail.
     document.addEventListener('keydown', e=>{
       if(e.key!=='Escape') return;
+      const help=document.getElementById('helpDialog');
+      if(help&&!help.hidden){ closeHelp(); return; }
       const results=document.getElementById('placeResults');
       if(results&&!results.hidden){ hidePlaceSearchResults(); return; }
       closeDetail();
