@@ -834,6 +834,8 @@
               <li>Na počítači se po najetí myší ukáže stručná bublina a kliknutím se otevře detail.</li>
               <li>Na telefonu nejprve klepni na bod a potom v bublině na <strong>Detail</strong>.</li>
               <li>Vybraný bod zůstane zvýrazněný, abys věděl, který detail je otevřený.</li>
+              <li><strong>Počítač:</strong> levý dvojklik přiblíží a pravý dvojklik oddálí mapu.</li>
+              <li><strong>Telefon:</strong> dvojité klepnutí přiblíží. Při druhém klepnutí můžeš prst podržet a táhnout dolů pro přiblížení nebo nahoru pro oddálení.</li>
             </ul>
           </section>
 
@@ -2543,11 +2545,130 @@
     updateZoneLegend();
   }
 
+  // Ovládání zoomu ve stylu Google Maps:
+  // PC: levý dvojklik přiblíží (nativní Leaflet), pravý dvojklik oddálí.
+  // Telefon: dvojité klepnutí přiblíží; druhé klepnutí + tažení dolů/nahoru
+  // plynule přibližuje/oddaluje jedním prstem.
+  function installMapGestures(){
+    const container=map.getContainer();
+    const ignoredTarget=target=>!!(target&&target.closest&&target.closest('.leaflet-control,.leaflet-popup,.leaflet-marker-icon'));
+    const clampZoom=value=>Math.max(map.getMinZoom(),Math.min(map.getMaxZoom(),value));
+    const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+    let tapCandidate=null;
+    let lastTap=null;
+    let touchZoom=null;
+    let suppressClickUntil=0;
+    let lastRightClick=null;
+
+    container.addEventListener('pointerdown',event=>{
+      // Primární levé tlačítko odpovídá prstu, peru i levému tlačítku myši.
+      // Není tak závislé na tom, jak konkrétní mobilní prohlížeč označí pointerType.
+      if(event.isPrimary===false||event.button!==0||ignoredTarget(event.target)) return;
+      const now=Date.now();
+      const point={x:event.clientX,y:event.clientY};
+      if(lastTap&&now-lastTap.time<=550&&distance(point,lastTap)<=42){
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        const dragWasEnabled=!!(map.dragging&&map.dragging.enabled());
+        if(dragWasEnabled) map.dragging.disable();
+        touchZoom={
+          pointerId:event.pointerId,startY:event.clientY,startZoom:map.getZoom(),
+          anchor:map.mouseEventToContainerPoint(event),moved:false,dragWasEnabled
+        };
+        lastTap=null;
+        tapCandidate=null;
+        suppressClickUntil=now+700;
+        try{ container.setPointerCapture(event.pointerId); }catch(e){}
+        return;
+      }
+      tapCandidate={pointerId:event.pointerId,x:event.clientX,y:event.clientY,time:now,moved:false};
+    },{capture:true,passive:false});
+
+    container.addEventListener('pointermove',event=>{
+      if(touchZoom&&event.pointerId===touchZoom.pointerId){
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        const dy=event.clientY-touchZoom.startY;
+        if(Math.abs(dy)>6) touchZoom.moved=true;
+        if(touchZoom.moved){
+          // Google Maps: dolů = přiblížit, nahoru = oddálit.
+          const targetZoom=clampZoom(Math.round((touchZoom.startZoom+dy/85)*4)/4);
+          if(Math.abs(targetZoom-map.getZoom())>=.12) map.setZoomAround(touchZoom.anchor,targetZoom);
+        }
+        return;
+      }
+      if(tapCandidate&&event.pointerId===tapCandidate.pointerId){
+        if(Math.hypot(event.clientX-tapCandidate.x,event.clientY-tapCandidate.y)>12) tapCandidate.moved=true;
+      }
+    },{capture:true,passive:false});
+
+    const finishTouch=event=>{
+      if(touchZoom&&event.pointerId===touchZoom.pointerId){
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        if(!touchZoom.moved){
+          map.setZoomAround(touchZoom.anchor,clampZoom(touchZoom.startZoom+1));
+        }
+        try{ container.releasePointerCapture(event.pointerId); }catch(e){}
+        if(touchZoom.dragWasEnabled) map.dragging.enable();
+        touchZoom=null;
+        suppressClickUntil=Date.now()+450;
+        return;
+      }
+      if(!tapCandidate||event.pointerId!==tapCandidate.pointerId) return;
+      const elapsed=Date.now()-tapCandidate.time;
+      if(!tapCandidate.moved&&elapsed<=300){
+        lastTap={x:event.clientX,y:event.clientY,time:Date.now()};
+      }else{
+        lastTap=null;
+      }
+      tapCandidate=null;
+    };
+    container.addEventListener('pointerup',finishTouch,{capture:true,passive:false});
+    container.addEventListener('pointercancel',event=>{
+      if(touchZoom&&event.pointerId===touchZoom.pointerId){
+        if(touchZoom.dragWasEnabled) map.dragging.enable();
+        touchZoom=null;
+      }
+      if(tapCandidate&&event.pointerId===tapCandidate.pointerId) tapCandidate=null;
+    },{capture:true,passive:false});
+
+    // Po vlastním dvojitém dotyku nesmí prohlížeč vyvolat ještě běžný klik do mapy.
+    container.addEventListener('click',event=>{
+      if(Date.now()>=suppressClickUntil) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    },true);
+
+    // Prohlížeče neposílají spolehlivě dblclick pro pravé tlačítko, proto
+    // rozpoznáme dvě rychlé události contextmenu na téměř stejném místě.
+    container.addEventListener('contextmenu',event=>{
+      if(event.button!==2||ignoredTarget(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const now=Date.now();
+      const point=map.mouseEventToContainerPoint(event);
+      if(lastRightClick&&now-lastRightClick.time<=470&&distance(point,lastRightClick.point)<=42){
+        map.setZoomAround(point,clampZoom(map.getZoom()-1));
+        lastRightClick=null;
+      }else{
+        lastRightClick={time:now,point};
+      }
+    },{capture:true});
+  }
+
   function initMap(){
     // Vytvoř mapu se středem aktuálně vybrané země (při prvním startu Česko)
     const cc = countryCfg();
     document.getElementById('body').classList.toggle('sb-collapsed',!!safeGet(SIDEBAR_KEY,false));
-    map = L.map('map', {zoomControl:true,maxZoom:19}).setView(cc.center, cc.zoom); // střed a zoom
+    map = L.map('map', {
+      zoomControl:true,maxZoom:19,doubleClickZoom:true,zoomSnap:.25,zoomDelta:1
+    }).setView(cc.center, cc.zoom);                              // střed a zoom
+    installMapGestures();
 
     // Satelitní (fotografická) podkladová vrstva – Esri World Imagery (zdarma, bez klíče)
     const sat = L.tileLayer(
